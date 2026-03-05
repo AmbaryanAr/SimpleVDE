@@ -14,6 +14,8 @@ INCDIR = include
 # Явно перечисляем все исходные файлы
 SOURCES = src/main.c \
 		src/main_commands.c \
+		src/disk/disk.c \
+		src/disk/disk_commands.c \
 		src/help/help.c
 
 # Преобразование в объектные файлы

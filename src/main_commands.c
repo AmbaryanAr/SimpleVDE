@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <errno.h>
 
 // *** Вспомогательная функция для вывода аргументов ***
 static void print_args_summary(CommandArgs *args) {
@@ -22,237 +24,291 @@ static void print_args_summary(CommandArgs *args) {
     if (args->has_offset) printf("  offset: %s\n", args->offset_raw);
 }
 
-// *** Статическая функция проверки обязательных аргументов ***
-static ErrorCode check_required_args(CommandArgs *args, int required_flags, const char *action_name) {
-    struct {
-        int flag;
-        bool has_field;
-        const char *arg_name;
-    } checks[] = {
-        { ARG_DISK_PATH,  args->has_disk_path,  "-disk=" },
-        { ARG_PART_INDEX, args->has_part_index, "-index=" },
-        { ARG_SIZE,       args->has_size,       "-size=" },
-        { ARG_TYPE,       args->has_type,       "-type=" },
-        { ARG_PATH,       args->has_path,       "-path= (disk)" },
-        { ARG_PATH_RAW,   args->has_path_raw,   "-path= (fs)" },
-        { ARG_FS_TYPE,    args->has_fs_type,    "-fs=" },
-        { ARG_NAME,       args->has_name,       "-name=" },
-        { ARG_FILE,       args->has_file,       "-file=" },
-        { ARG_SRC,        args->has_src,        "-src=" },
-        { ARG_OP,         args->has_op,         "-op=" },
-        { ARG_OFFSET,     args->has_offset,     "-offset=" }
-    };
+// Парсинг размера с поддержкой суффиксов k, K, m, M, g, G (по умолчанию M)
+// Пример: "128M" -> 128, "1G" -> 1024, "512" -> 512
+// Возвращает true и записывает результат в *size_mb, иначе false
+static bool parse_number(const char *size_str, uint64_t *size_mb) {
+    if (!size_str || !*size_str) return false;
 
-    for (size_t i = 0; i < sizeof(checks)/sizeof(checks[0]); i++) {
-        if ((required_flags & checks[i].flag) && !checks[i].has_field) {
-            printf("ERROR: %s is required for %s\n", checks[i].arg_name, action_name);
-            return ERR_MISSING_ARGUMENT;
-        }
+    char *endptr;
+    uint64_t value = strtoll(size_str, &endptr, 10);
+    if (endptr == size_str) return false; // нет цифр
+    if (value <= 0) return false;
+
+    // Пропускаем пробелы после числа (хотя их быть не должно)
+    while (*endptr == ' ') endptr++;
+
+    char suffix = *endptr;
+    if (suffix == '\0') {
+        // нет суффикса — считаем мегабайтами
+        *size_mb = value;
+        return true;
     }
-    return ERR_OK;
+
+    // Приводим к верхнему регистру для простоты
+    if (suffix >= 'a' && suffix <= 'z') suffix -= 32;
+
+    switch (suffix) {
+		case 'k':
+        case 'K': // килобайты -> мегабайты
+            *size_mb = value / 1024;
+            // если остаток есть, округление вверх? лучше потребовать целое число МБ?
+            if (value % 1024 != 0) {
+                // Можно либо округлить, либо вернуть ошибку. Потребуем точное число МБ.
+                return false;
+            }
+            break;
+		case 'm':
+        case 'M':
+            *size_mb = value;
+            break;
+		case 'g':
+        case 'G':
+            *size_mb = value * 1024;
+            break;
+        default:
+            return false; // неизвестный суффикс
+    }
+
+    // Проверяем, что после суффикса ничего нет
+    endptr++;
+    if (*endptr != '\0') return false;
+
+    return true;
+}
+
+// Парсинг целого числа с поддержкой десятичной и шестнадцатеричной записи (0x...)
+static bool parse_integer(const char *str, uint64_t *out) {
+    if (!str || !*str) return false;
+    char *endptr;
+    errno = 0;
+    int64_t val = strtoll(str, &endptr, 0); // автоопределение основания
+    if (endptr == str || *endptr != '\0' || errno == ERANGE) return false;
+    if (val < 0) return false; // отрицательные значения не допускаются
+    *out = val;
+    return true;
 }
 // ***
 
-// ---------- Заглушки для дисковых операций ----------
-int process_create_disk(CommandArgs *args) {
-    printf("\n>>> STUB: process_create_disk\n");
-    print_args_summary(args);
+// ---------- Функции для дисковых операций ----------
+ErrorCode process_create_disk(CommandArgs *args) {
+	print_args_summary(args);
+    if (!args->has_path || !args->has_size || !args->has_type)
+        return ERR_MISSING_ARGUMENT;
 
-    if (check_required_args(args, ARG_PATH | ARG_SIZE | ARG_TYPE, "disk creation") != ERR_OK)
-        return 1;
+    CreateDiskParams params;
 
-    printf("ACTION: Would create disk at '%s' with size %s and type %s\n", 
-           args->path, args->size_raw, args->type_raw);
-    return 0;
+    // Путь
+    strncpy(params.path, args->path, sizeof(params.path) - 1);
+    params.path[sizeof(params.path) - 1] = '\0';
+
+    // Размер
+    uint64_t size_mb = 0;
+    if (!parse_number(args->size_raw, &size_mb) || size_mb <= 0)
+        return ERR_INVALID_VALUE;
+    params.size_mb = size_mb;
+
+    // Тип таблицы разделов
+    // args->type_raw гарантированно есть (has_type)
+    strncpy(params.partition_type, args->type_raw, sizeof(params.partition_type) - 1);
+    params.partition_type[sizeof(params.partition_type) - 1] = '\0';
+
+    // Вызов команды создания диска
+   return cmd_create_disk(&params);
 }
 
-int process_disk_info(CommandArgs *args) {
-    printf("\n>>> STUB: process_disk_info\n");
-    print_args_summary(args);
-
-    if (check_required_args(args, ARG_PATH, "disk info") != ERR_OK)
-        return 1;
-
-    printf("ACTION: Would show information for disk at '%s'\n", args->path);
-    return 0;
+ErrorCode process_disk_info(CommandArgs *args) {
+    if (!args->has_path)
+        return ERR_MISSING_ARGUMENT;
+    return cmd_disk_info(args->path);
 }
 
-int process_disk_read(CommandArgs *args) {
-    printf("\n>>> STUB: process_disk_read\n");
-    print_args_summary(args);
+ErrorCode process_disk_read(CommandArgs *args) {
+    if (!args->has_path || !args->has_offset || !args->has_size) {
+        return ERR_MISSING_ARGUMENT;
+    }
 
-    if (check_required_args(args, ARG_PATH | ARG_OFFSET | ARG_SIZE, "disk read") != ERR_OK)
-        return 1;
-
-    printf("ACTION: Would read %s bytes from disk '%s' at offset %s\n", 
-           args->size_raw, args->path, args->offset_raw);
-    return 0;
+    // Парсинг offset и size (в секторах)
+    uint64_t offset_sectors, size_sectors;
+    if (!parse_integer(args->offset_raw, &offset_sectors)) {
+        printf("ERROR: Invalid offset value '%s' (must be non‑negative integer, decimal or hex)\n", args->offset_raw);
+        return ERR_INVALID_VALUE;
+    }
+    if (!parse_integer(args->size_raw, &size_sectors)) {
+        printf("ERROR: Invalid size value '%s' (must be non‑negative integer, decimal or hex)\n", args->size_raw);
+        return ERR_INVALID_VALUE;
+    }
+    if (size_sectors == 0) {
+        printf("Warning: size is zero, nothing to read.\n");
+        return ERR_OK;
+    }
+	
+    return cmd_disk_read_sector(args->path, offset_sectors, size_sectors);
 }
 
 // ---------- Заглушки для операций с разделами ----------
-int process_create_partition(CommandArgs *args) {
+ErrorCode process_create_partition(CommandArgs *args) {
     printf("\n>>> STUB: process_create_partition\n");
     print_args_summary(args);
-
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_SIZE | ARG_TYPE, "partition creation") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_size || !args->has_type)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would create %s partition at index %s on disk '%s' with size %s\n", 
            args->type_raw, args->part_index_raw, args->disk_path, args->size_raw);
-    return 0;
+    return ERR_OK;
 }
 
-int process_delete_partition(CommandArgs *args) {
+ErrorCode process_delete_partition(CommandArgs *args) {
     printf("\n>>> STUB: process_delete_partition\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX, "partition deletion") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would delete partition at index %s on disk '%s'\n", 
            args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
-int process_set_active(CommandArgs *args) {
+ErrorCode process_set_active(CommandArgs *args) {
     printf("\n>>> STUB: process_set_active\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_OP, "set active") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_op)
+		return ERR_MISSING_ARGUMENT;
 
     if (strcmp(args->op_raw, "active") != 0 && strcmp(args->op_raw, "inactive") != 0) {
         printf("ERROR: -op= must be 'active' or 'inactive' for set active\n");
-        return 1;
+        return ERR_INVALID_VALUE;
     }
 
     const char *state = (strcmp(args->op_raw, "active") == 0) ? "active" : "inactive";
     printf("ACTION: Would set partition at index %s on disk '%s' as %s\n", 
            args->part_index_raw, args->disk_path, state);
-    return 0;
+    return ERR_OK;
 }
 
-int process_set_type(CommandArgs *args) {
+ErrorCode process_set_type(CommandArgs *args) {
     printf("\n>>> STUB: process_set_type\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_TYPE, "set type") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_type)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would set type of partition at index %s on disk '%s' to %s\n", 
            args->part_index_raw, args->disk_path, args->type_raw);
-    return 0;
+    return ERR_OK;
 }
 
-int process_format(CommandArgs *args) {
+ErrorCode process_format(CommandArgs *args) {
     printf("\n>>> STUB: process_format\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_TYPE, "format") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_type)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would format partition at index %s on disk '%s' as %s\n", 
            args->part_index_raw, args->disk_path, args->type_raw);
-    return 0;
+    return ERR_OK;
 }
 
-int process_write_mbr_loader(CommandArgs *args) {
+ErrorCode process_write_mbr_loader(CommandArgs *args) {
     printf("\n>>> STUB: process_write_mbr_loader\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_FILE, "write MBR") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_file)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would write MBR loader from file '%s' to partition at index %s on disk '%s'\n", 
            args->file_raw, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
-int process_write_bpb_loader(CommandArgs *args) {
+ErrorCode process_write_bpb_loader(CommandArgs *args) {
     printf("\n>>> STUB: process_write_bpb_loader\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_FILE, "write BPB") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_file)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would write BPB loader from file '%s' to partition at index %s on disk '%s'\n", 
            args->file_raw, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
 // ---------- Заглушки для файловых операций ----------
-int process_ls(CommandArgs *args) {
+ErrorCode process_ls(CommandArgs *args) {
     printf("\n>>> STUB: process_ls\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX, "ls") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index)
+		return ERR_MISSING_ARGUMENT;
 
     const char *path = args->has_path_raw ? args->path_raw : "/";
     printf("ACTION: Would list contents of '%s' on partition %s of disk '%s'\n", 
            path, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
-int process_copy(CommandArgs *args) {
+ErrorCode process_copy(CommandArgs *args) {
     printf("\n>>> STUB: process_copy\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_SRC | ARG_DISK_PATH | ARG_PART_INDEX | ARG_PATH_RAW, "copy") != ERR_OK)
-        return 1;
+	if (!args->has_src || !args->has_disk_path || !args->has_part_index || !args->has_path_raw)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would copy host file '%s' to '%s' on partition %s of disk '%s'\n", 
            args->src_raw, args->path_raw, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
-int process_rm(CommandArgs *args) {
+ErrorCode process_rm(CommandArgs *args) {
     printf("\n>>> STUB: process_rm\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_PATH_RAW, "rm") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_path_raw)
+		return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would remove file '%s' on partition %s of disk '%s'\n", 
            args->path_raw, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
-int process_mkdir(CommandArgs *args) {
+ErrorCode process_mkdir(CommandArgs *args) {
     printf("\n>>> STUB: process_mkdir\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_PATH_RAW, "mkdir") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_path_raw)
+        return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would create directory '%s' on partition %s of disk '%s'\n", 
            args->path_raw, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
-int process_rmdir(CommandArgs *args) {
+ErrorCode process_rmdir(CommandArgs *args) {
     printf("\n>>> STUB: process_rmdir\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_PATH_RAW, "rmdir") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_path_raw)
+        return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would remove directory '%s' on partition %s of disk '%s'\n", 
            args->path_raw, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
 
 // ---------- Заглушки для карты специальных файлов ----------
-int process_map_file(CommandArgs *args) {
+ErrorCode process_map_file(CommandArgs *args) {
     printf("\n>>> STUB: process_map_file\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_OP, "map_file") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_op)
+        return ERR_MISSING_ARGUMENT;
 
     if (strcmp(args->op_raw, "delete") == 0 && !args->has_name) {
         printf("ERROR: -name= is required for delete operation\n");
-        return 1;
+        return ERR_INVALID_VALUE;
     }
 
     if (strcmp(args->op_raw, "list") == 0) {
@@ -263,20 +319,20 @@ int process_map_file(CommandArgs *args) {
                args->name_raw, args->part_index_raw, args->disk_path);
     } else {
         printf("ERROR: Unsupported operation '%s' for map_file\n", args->op_raw);
-        return 1;
+        return ERR_INVALID_VALUE;
     }
 
-    return 0;
+    return ERR_OK;
 }
 
-int process_copy_special(CommandArgs *args) {
+ErrorCode process_copy_special(CommandArgs *args) {
     printf("\n>>> STUB: process_copy_special\n");
     print_args_summary(args);
 
-    if (check_required_args(args, ARG_DISK_PATH | ARG_PART_INDEX | ARG_SRC | ARG_PATH_RAW, "copy_special") != ERR_OK)
-        return 1;
+	if (!args->has_disk_path || !args->has_part_index || !args->has_src || !args->has_path_raw)
+        return ERR_MISSING_ARGUMENT;
 
     printf("ACTION: Would copy host file '%s' to '%s' on partition %s of disk '%s' with map file entry\n", 
            args->src_raw, args->path_raw, args->part_index_raw, args->disk_path);
-    return 0;
+    return ERR_OK;
 }
