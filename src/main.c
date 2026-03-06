@@ -20,6 +20,24 @@ static bool extract_value(const char *arg, const char *prefix, char *value, int 
     value[max_len - 1] = '\0';
     return true;
 }
+
+static void free_args(CommandArgs *args) {
+    if (!args) return;
+    free(args->disk_path);
+    free(args->part_index_raw);
+    free(args->size_raw);
+    free(args->type_raw);
+    free(args->path);
+    free(args->path_raw);
+    free(args->fs_type);
+    free(args->name_raw);
+    free(args->file_raw);
+    free(args->src_raw);
+    free(args->op_raw);
+    free(args->offset_raw);
+    // Обнуляем указатели (на всякий случай)
+    memset(args, 0, sizeof(CommandArgs));
+}
 // ***
 
 int main(int argc, char *argv[]) {
@@ -55,6 +73,7 @@ int main(int argc, char *argv[]) {
 
     CommandArgs args = {0};
     args.command = category;   // сохраняем категорию
+	int ret = 0;
 
     // Парсим остальные аргументы (начиная с индекса 2)
     for (int i = 2; i < argc; i++) {
@@ -118,78 +137,106 @@ int main(int argc, char *argv[]) {
     if (strcmp(category, "--disk") == 0) {
         if (!args.has_op) {
             printf("Error: --disk requires -op parameter.\n");
-            return 1;
+            ret = 1;
+        	goto cleanup;
         }
         if (strcmp(args.op_raw, "create") == 0) {
-            return process_create_disk(&args);
+            ret =  process_create_disk(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "info") == 0) {
-            return process_disk_info(&args);
+            ret =  process_disk_info(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "read") == 0) {
             // Предполагается наличие функции process_disk_read
-            return process_disk_read(&args);
+            ret =  process_disk_read(&args);
+			goto cleanup;
         } else {
             printf("Error: Unknown operation '%s' for --disk\n", args.op_raw);
-            return 1;
+            ret =  1;
+			goto cleanup;
         }
     }
     else if (strcmp(category, "--partition") == 0) {
         if (!args.has_op) {
             printf("Error: --partition requires -op parameter.\n");
-            return 1;
+            ret = 1;
+			goto cleanup;
         }
         if (strcmp(args.op_raw, "create") == 0) {
-            return process_create_partition(&args);
+            ret =  process_create_partition(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "delete") == 0) {
-            return process_delete_partition(&args);
+            ret =  process_delete_partition(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "active") == 0 || strcmp(args.op_raw, "inactive") == 0) {
             // Предполагается, что process_set_active использует args.op_raw
-            return process_set_active(&args);
+            ret =  process_set_active(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "set_type") == 0) {
-            return process_set_type(&args);
+            ret =  process_set_type(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "format") == 0) {
-            return process_format(&args);
+            ret =  process_format(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "write_mbr") == 0) {
-            return process_write_mbr_loader(&args);
+            ret =  process_write_mbr_loader(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "write_bpb") == 0) {
-            return process_write_bpb_loader(&args);
+            ret =  process_write_bpb_loader(&args);
+			goto cleanup;
         } else {
             printf("Error: Unknown operation '%s' for --partition\n", args.op_raw);
-            return 1;
+            ret =  1;
+			goto cleanup;
         }
     }
     else if (strcmp(category, "--copy") == 0) {
         // операция копирования без дополнительной опции
-        return process_copy(&args);
+        ret =  process_copy(&args);
+		goto cleanup;
     }
     else if (strcmp(category, "--ls") == 0) {
-        return process_ls(&args);
+        ret =  process_ls(&args);
+		goto cleanup;
     }
     else if (strcmp(category, "--mkdir") == 0) {
-        return process_mkdir(&args);
+        ret =  process_mkdir(&args);
+		goto cleanup;
     }
     else if (strcmp(category, "--rmdir") == 0) {
-        return process_rmdir(&args);
+        ret =  process_rmdir(&args);
+		goto cleanup;
     }
     else if (strcmp(category, "--rm") == 0) {
-        return process_rm(&args);
+        ret =  process_rm(&args);
+		goto cleanup;
     }
     else if (strcmp(category, "--map_file") == 0) {
         if (!args.has_op) {
             printf("Error: --map_file requires -op parameter.\n");
-            return 1;
+            ret =  1;
+			goto cleanup;
         }
         if (strcmp(args.op_raw, "list") == 0) {
-            return process_map_file(&args);
+            ret =  process_map_file(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "delete") == 0) {
-            return process_map_file(&args);
+            ret =  process_map_file(&args);
+			goto cleanup;
         } else if (strcmp(args.op_raw, "copy") == 0) {
-            return process_copy_special(&args);
+            ret =  process_copy_special(&args);
+			goto cleanup;
         } else {
             printf("Error: Unknown operation '%s' for --map_file\n", args.op_raw);
-            return 1;
+            ret =  1;
+			goto cleanup;
         }
     }
 
     printf("Unknown command category: %s\n", category);
-    return 1;
+	ret = 1;
+
+cleanup:
+	free_args(&args);
+    return ret;
 }
