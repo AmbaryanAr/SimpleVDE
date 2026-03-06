@@ -1,6 +1,7 @@
 #include "disk.h"
 #include <string.h>
 #include <stdlib.h>
+#include <inttypes.h> 
 
 // *** Вспомогательные функции ***
 // Смещение указателя 
@@ -28,20 +29,20 @@ ErrorCode disk_open(const char *path, Disk *disk) {
 		return ERR_DISK_OPEN;
 
     // Определяем размер файла
-    if (fseek(f, 0, SEEK_END) != 0) {
+    if (fseek64(f, 0, SEEK_END) != 0) {
         fclose(f);
         return ERR_DISK_SEEK;
     }
-    long sz = ftell(f);
+    int64_t sz = ftell64(f);
     if (sz == -1) {
         fclose(f);
         return ERR_DISK_SEEK;
     }
-    rewind(f); // эквивалент fseek(f, 0, SEEK_SET)
+    rewind(f); // или fseek64(f, 0, SEEK_SET)
 
     strncpy(disk->path, path, MAX_PATH - 1);
     disk->path[MAX_PATH - 1] = '\0';
-    disk->size = sz;
+    disk->size = (uint64_t)sz;
     disk->file = f;
     disk->is_open = 1;
     return ERR_OK;
@@ -59,14 +60,18 @@ void disk_close(Disk *disk) {
 // Создать новый диск
 ErrorCode disk_create(const char *path, uint64_t size_mb, Disk *disk) {
     if (!path || !disk)
-		return ERR_DISK_CREATE;
+        return ERR_DISK_CREATE;
+
+    // Проверка переполнения при size_mb * 1024 * 1024
+    if (size_mb > UINT64_MAX / (1024ULL * 1024ULL))
+        return ERR_INVALID_VALUE;
+    uint64_t size_bytes = size_mb * 1024ULL * 1024ULL;
 
     // Открываем файл в режиме чтения/записи, создавая новый
     FILE *f = fopen(path, "wb+");
     if (!f)
-		return ERR_DISK_CREATE;
+        return ERR_DISK_OPEN;
 
-    uint64_t size_bytes = size_mb * 1024ULL * 1024ULL;
     char *buffer = (char*)malloc(1024 * 1024); // 1 MB
     if (!buffer) {
         fclose(f);
@@ -83,7 +88,7 @@ ErrorCode disk_create(const char *path, uint64_t size_mb, Disk *disk) {
             return ERR_DISK_WRITE;
         }
         if (i % (10 * 1024 * 1024) == 0) {
-            printf("Progress: %lld / %lld MB\r", i / (1024 * 1024), size_mb);
+            printf("Progress: %" PRIu64 " / %" PRIu64 " MB\r", i / (1024 * 1024), size_mb);
             fflush(stdout);
         }
     }
@@ -116,7 +121,7 @@ ErrorCode disk_read(Disk *disk, void *value, uint32_t size_value, uint64_t offse
 // Записать на диск
 ErrorCode disk_write(Disk *disk, const void *value, uint32_t size_value, uint64_t offset) {
     if (!disk || !disk->is_open || !disk->file)
-		return false;
+		return ERR_DISK_OPEN;
 	else
     if(_write(disk->file, value, size_value, offset) != size_value)
 		return ERR_DISK_WRITE;

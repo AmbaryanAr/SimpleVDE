@@ -16,6 +16,8 @@ SOURCES = src/main.c \
 		src/main_commands.c \
 		src/disk/disk.c \
 		src/disk/disk_commands.c \
+		src/mbr/mbr_commands.c \
+		src/gpt/gpt_commands.c \
 		src/help/help.c
 
 # Преобразование в объектные файлы

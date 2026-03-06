@@ -10,5 +10,6 @@ typedef enum {
     ERR_DISK_CREATE,          ///< Ошибка создания файла диска
     ERR_DISK_READ,            ///< Ошибка чтения с диска
     ERR_DISK_WRITE,           ///< Ошибка записи на диск
-    ERR_DISK_SEEK             ///< Ошибка позиционирования в файле диска
+    ERR_DISK_SEEK,            ///< Ошибка позиционирования в файле диска
+	ERR_NULL_POINTER          ///< Пустой указатель на структуру
 } ErrorCode;

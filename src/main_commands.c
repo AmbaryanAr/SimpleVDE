@@ -24,14 +24,13 @@ static void print_args_summary(CommandArgs *args) {
     if (args->has_offset) printf("  offset: %s\n", args->offset_raw);
 }
 
-// Парсинг размера с поддержкой суффиксов k, K, m, M, g, G (по умолчанию M)
-// Пример: "128M" -> 128, "1G" -> 1024, "512" -> 512
+// Парсинг размера с поддержкой суффиксов K, M, G (по умолчанию M)
 // Возвращает true и записывает результат в *size_mb, иначе false
 static bool parse_number(const char *size_str, uint64_t *size_mb) {
     if (!size_str || !*size_str) return false;
 
     char *endptr;
-    uint64_t value = strtoll(size_str, &endptr, 10);
+    uint64_t value = strtoull(size_str, &endptr, 10);
     if (endptr == size_str) return false; // нет цифр
     if (value <= 0) return false;
 
@@ -48,27 +47,21 @@ static bool parse_number(const char *size_str, uint64_t *size_mb) {
     // Приводим к верхнему регистру для простоты
     if (suffix >= 'a' && suffix <= 'z') suffix -= 32;
 
-    switch (suffix) {
-		case 'k':
-        case 'K': // килобайты -> мегабайты
-            *size_mb = value / 1024;
-            // если остаток есть, округление вверх? лучше потребовать целое число МБ?
-            if (value % 1024 != 0) {
-                // Можно либо округлить, либо вернуть ошибку. Потребуем точное число МБ.
-                return false;
-            }
-            break;
-		case 'm':
-        case 'M':
-            *size_mb = value;
-            break;
-		case 'g':
-        case 'G':
-            *size_mb = value * 1024;
-            break;
-        default:
-            return false; // неизвестный суффикс
-    }
+	switch (suffix) {
+		case 'K':
+			*size_mb = value / 1024;
+			if (value % 1024 != 0) 
+				return false;
+			break;
+		case 'M':
+			*size_mb = value;
+			break;
+		case 'G':
+			*size_mb = value * 1024;
+			break;
+		default:
+			return false;
+	}
 
     // Проверяем, что после суффикса ничего нет
     endptr++;
@@ -92,7 +85,6 @@ static bool parse_integer(const char *str, uint64_t *out) {
 
 // ---------- Функции для дисковых операций ----------
 ErrorCode process_create_disk(CommandArgs *args) {
-	print_args_summary(args);
     if (!args->has_path || !args->has_size || !args->has_type)
         return ERR_MISSING_ARGUMENT;
 

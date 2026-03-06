@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <limits.h>
+#include <inttypes.h>
 
 #ifdef _WIN32
     #include <io.h>
@@ -12,6 +13,7 @@
     #include <unistd.h>
 #endif
 
+// *** Вспомогательная функция ***
 // Проверка существования файла
 static int file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -23,6 +25,39 @@ static int file_exists(const char *path) {
 static void str_toupper(char *str) {
     for (; *str; ++str) *str = toupper((unsigned char)*str);
 }
+
+// Определение типа таблицы на диске
+static PartitionTableType detect_partition_table(Disk *disk) {
+    unsigned char sector[MBR_SIZE];
+    ErrorCode err = disk_read(disk, sector, MBR_SIZE, 0);
+    if (err != ERR_OK) {
+        return PT_UNKNOWN;
+    }
+
+    // Проверка сигнатуры MBR
+    if (sector[510] == 0x55 && sector[511] == 0xAA) {
+        // Ищем защитный раздел типа 0xEE (признак GPT)
+        int is_protective = 0;
+        for (int i = 0; i < 4; i++) {
+            if (sector[PARTITION_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE + 4] == 0xEE) {
+                is_protective = 1;
+                break;
+            }
+        }
+        if (is_protective) {
+            // Читаем второй сектор (LBA1) и проверяем сигнатуру GPT
+            unsigned char gpt_sig[8];
+            if (disk_read(disk, gpt_sig, 8, MBR_SIZE) == ERR_OK &&
+                memcmp(gpt_sig, "EFI PART", 8) == 0) {
+                return PT_GPT;
+            }
+        }
+        return PT_MBR;
+    }
+
+    return PT_UNKNOWN;
+}
+// ***
 
 // Создание виртуального диска
 ErrorCode cmd_create_disk(CreateDiskParams *params) {
@@ -45,11 +80,22 @@ ErrorCode cmd_create_disk(CreateDiskParams *params) {
     type_upper[sizeof(type_upper)-1] = '\0';
     str_toupper(type_upper);
 
+	ErrorCode err;
     if (strcmp(type_upper, "MBR") == 0) {
-        printf(">>> STUB: MBR initialized.\n");
-    } else if (strcmp(type_upper, "GPT") == 0) {
-        printf(">>> STUB: GPT initialized.\n");
-    } else {
+		err = mbr_create(&disk);
+		if (err != ERR_OK) {
+			disk_close(&disk);
+			return err;
+		}
+		printf(" - MBR initialized.\n");
+	} else if (strcmp(type_upper, "GPT") == 0) {
+		err = gpt_create(&disk);
+		if (err != ERR_OK) {
+			disk_close(&disk);
+			return err;
+		}
+		printf(" - GPT initialized.\n");
+	} else {
         printf(" - Warning: Unknown partition type '%s'.\n", params->partition_type);
     }
 
@@ -61,7 +107,6 @@ ErrorCode cmd_create_disk(CreateDiskParams *params) {
 // Информация о диске
 ErrorCode cmd_disk_info(const char *path) {
     printf("Disk information for: %s\n", path);
-
     Disk disk;
     ErrorCode err = disk_open(path, &disk);
     if (err != ERR_OK) {
@@ -71,56 +116,17 @@ ErrorCode cmd_disk_info(const char *path) {
 
     uint64_t size_mb = disk.size / (1024 * 1024);
     uint64_t size_gb = size_mb / 1024;
-    printf(" - Size: %llu bytes (%llu MB, %llu GB)\n",
-           disk.size, size_mb, size_gb);
+    printf(" - Size: %" PRIu64 " bytes (%" PRIu64 " MB, %" PRIu64 " GB)\n", disk.size, size_mb, size_gb);
 
-    unsigned char sector[512];
-    err = disk_read(&disk, sector, 512, 0);
-    if (err != ERR_OK) {
-        printf(" - Error: cannot read first sector (code %d)\n", err);
-        disk_close(&disk);
-        return err;
-    }
-
-    int is_gpt = 0;
-    if (sector[510] == 0x55 && sector[511] == 0xAA) {
-        int is_protective = 0;
-        for (int i = 0; i < 4; i++) {
-            if (sector[446 + i*16 + 4] == 0xEE) {
-                is_protective = 1;
-                break;
-            }
-        }
-        if (is_protective) {
-            unsigned char gpt_sig[8];
-            if (disk_read(&disk, gpt_sig, 8, 512) == ERR_OK &&
-                memcmp(gpt_sig, "EFI PART", 8) == 0) {
-                is_gpt = 1;
-            }
-        }
-    }
-
-    if (is_gpt) {
+    PartitionTableType table_type = detect_partition_table(&disk);
+    if (table_type == PT_GPT) {
         printf(" - Partition table: GPT\n");
+        gpt_print_info(&disk);
+    } else if (table_type == PT_MBR) {
+        printf(" - Partition table: MBR\n");
+        mbr_print_info(&disk);
     } else {
-        if (sector[510] == 0x55 && sector[511] == 0xAA) {
-            printf(" - Partition table: MBR\n");
-            int part_count = 0;
-            for (int i = 0; i < 4; i++) {
-                if (sector[446 + i*16 + 4] != 0x00) part_count++;
-            }
-            printf(" - Number of primary partitions: %d\n", part_count);
-            for (int i = 0; i < 4; i++) {
-                unsigned char type = sector[446 + i*16 + 4];
-                if (type == 0x00) continue;
-                unsigned int lba = *(unsigned int*)(sector + 446 + i*16 + 8);
-                unsigned int size = *(unsigned int*)(sector + 446 + i*16 + 12);
-                printf("    Partition %d: type=0x%02X, start LBA=%u, size=%u sectors\n",
-                       i+1, type, lba, size);
-            }
-        } else {
-            printf(" - No valid MBR/GPT signature found (disk may be raw)\n");
-        }
+        printf(" - No valid MBR/GPT signature found (disk may be raw)\n");
     }
 
     disk_close(&disk);
@@ -131,14 +137,13 @@ ErrorCode cmd_disk_info(const char *path) {
 // Чтение секторов и вывод hex-дампа
 ErrorCode cmd_disk_read_sector(const char *path, uint64_t offset_sectors, uint64_t size_sectors) {
     printf("The process of read sector a virtual disk:\n");
-    const uint64_t SECTOR_SIZE = 512;
 
     // Проверка переполнения при умножении
-    if (offset_sectors > LLONG_MAX / SECTOR_SIZE) {
+    if (offset_sectors > UINT64_MAX / SECTOR_SIZE) {
         printf(" - ERROR: Offset too large (overflow)\n");
         return ERR_INVALID_VALUE;
     }
-    if (size_sectors > LLONG_MAX / SECTOR_SIZE) {
+    if (size_sectors > UINT64_MAX / SECTOR_SIZE) {
         printf(" - ERROR: Size too large (overflow)\n");
         return ERR_INVALID_VALUE;
     }
@@ -152,7 +157,7 @@ ErrorCode cmd_disk_read_sector(const char *path, uint64_t offset_sectors, uint64
 
     uint64_t start_byte = offset_sectors * SECTOR_SIZE;
     if (start_byte >= disk.size) {
-        printf(" - ERROR: Offset %lld sectors (byte %llu) exceeds disk size (%llu bytes)\n",
+        printf(" - ERROR: Offset %" PRIu64 " sectors (byte %" PRIu64 ") exceeds disk size (%" PRIu64 " bytes)\n",
                offset_sectors, start_byte, disk.size);
         disk_close(&disk);
         return ERR_INVALID_VALUE;
@@ -161,7 +166,7 @@ ErrorCode cmd_disk_read_sector(const char *path, uint64_t offset_sectors, uint64
     uint64_t max_bytes = disk.size - start_byte;
     uint64_t max_sectors = max_bytes / SECTOR_SIZE;
     if (size_sectors > max_sectors) {
-        printf(" - Warning: Requested %lld sectors, but only %llu sectors available. Reading %llu sectors.\n",
+        printf(" - Warning: Requested %" PRIu64 " sectors, but only %" PRIu64 " sectors available. Reading %" PRIu64 " sectors.\n",
                size_sectors, max_sectors, max_sectors);
         size_sectors = max_sectors;
     }
@@ -172,13 +177,13 @@ ErrorCode cmd_disk_read_sector(const char *path, uint64_t offset_sectors, uint64
         return ERR_OK;
     }
 
-    uint32_t bytes_to_read = size_sectors * SECTOR_SIZE;
-    // Ограничение на 4 ГБ за раз (из-за uint32_t в disk_read)
-    if (bytes_to_read > UINT32_MAX) {
-        printf(" - ERROR: Requested read size too large (exceeds 4 GB).\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
+	uint64_t bytes_to_read_64 = size_sectors * SECTOR_SIZE;
+	if (bytes_to_read_64 > UINT32_MAX) {
+		printf(" - ERROR: Requested read size too large (exceeds 4 GB).\n");
+		disk_close(&disk);
+		return ERR_INVALID_VALUE;
+	}
+	uint32_t bytes_to_read = (uint32_t)bytes_to_read_64;
 
     unsigned char *buffer = (unsigned char*)malloc(bytes_to_read);
     if (!buffer) {
@@ -198,16 +203,16 @@ ErrorCode cmd_disk_read_sector(const char *path, uint64_t offset_sectors, uint64
     printf("\nOffset (hex)   Hex data (first %u bytes)                               Ascii\n", bytes_to_read);
     printf("-------------- ------------------------------------------------------------ ----------------\n");
 
-    for (uint64_t i = 0; i < bytes_to_read; i += 16) {
-        printf("0x%08llx  ", (start_byte + i));
-        for (int j = 0; j < 16; j++) {
+    for (uint64_t i = 0; i < bytes_to_read; i += HEX_DUMP_WIDTH) {
+        printf("0x%08" PRIx64 "  ", start_byte + i);
+        for (int j = 0; j < HEX_DUMP_WIDTH; j++) {
             if (i + j < bytes_to_read)
                 printf("%02X ", buffer[i + j]);
             else
                 printf("   ");
         }
         printf(" ");
-        for (int j = 0; j < 16; j++) {
+        for (int j = 0; j < HEX_DUMP_WIDTH; j++) {
             if (i + j < bytes_to_read) {
                 unsigned char c = buffer[i + j];
                 printf("%c", (c >= 32 && c <= 126) ? c : '.');

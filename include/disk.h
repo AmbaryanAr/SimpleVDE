@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define SECTOR_SIZE 512
 #define MAX_PATH 260
 
 #ifdef _WIN32
