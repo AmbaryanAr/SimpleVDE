@@ -19,7 +19,7 @@ void print_help(void) {
     printf("  --partition -disk=DISK_PATH -index=IDX -op=active|inactive                Set partition active/bootable\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=set_type -type=FAT32           Change partition type\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=format -type=FAT32             Format partition\n");
-    printf("  --partition -disk=DISK_PATH -index=IDX -op=write_mbr -file=FILE           Write MBR code\n");
+    printf("  --partition -disk=DISK_PATH -op=write_mbr -file=FILE                      Write MBR code\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=write_bpb -file=FILE           Write BPB code\n");
     printf("\nFile system operations:\n");
     printf("  --copy -src=HOST_FILE -disk=DISK_PATH -index=IDX -path=FS_PATH            Copy file from OS to disk\n");

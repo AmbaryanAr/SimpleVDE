@@ -178,7 +178,7 @@ ErrorCode gpt_create(Disk *disk) {
 }
 
 // Преобразование GUID в строку формата XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-void guid_to_string(const uint8_t *guid, char *str) {
+void gpt_guid_to_string(const uint8_t *guid, char *str) {
     sprintf(str, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
             guid[3], guid[2], guid[1], guid[0],
             guid[5], guid[4],
@@ -188,7 +188,7 @@ void guid_to_string(const uint8_t *guid, char *str) {
 }
 
 // Преобразование строки GUID в 16 байт (little-endian)
-int guid_from_string(const char *str, uint8_t *guid) {
+int gpt_guid_from_string(const char *str, uint8_t *guid) {
     const char *p = str;
     for (int byte = 0; byte < 16; byte++) {
         char hex[3] = {0};
@@ -220,9 +220,17 @@ void gpt_print_info(Disk *disk) {
     printf(" - Revision: %u.%u\n", header->revision >> 16, header->revision & 0xFFFF);
     printf(" - Disk GUID: ");
     char guid_str[37];
-    guid_to_string(header->disk_guid, guid_str);
+    gpt_guid_to_string(header->disk_guid, guid_str);
     printf("%s\n", guid_str);
     printf(" - First usable LBA: %" PRIu64 "\n", header->first_usable_lba);
     printf(" - Last usable LBA: %" PRIu64 "\n", header->last_usable_lba);
     printf(" - Number of partition entries: %u\n", header->num_partition_entries);
+}
+
+// TODO: реализовать удаление раздела GPT, пока что заглушка
+ErrorCode gpt_delete_partition(Disk *disk, int index) {
+    (void)disk;
+    (void)index;
+	printf("\n>>> STUB: gpt_delete_partition\n");
+    return ERR_OK;
 }

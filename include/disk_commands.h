@@ -57,3 +57,23 @@ ErrorCode cmd_disk_info(const char *path);
  * @return Код ошибки или ERR_OK.
  */
 ErrorCode cmd_disk_read_sector(const char *path, uint64_t offset_sectors, uint64_t size_sectors);
+
+/**
+ * Открывает файл диска и определяет тип таблицы разделов на нём.
+ *
+ * Функция объединяет вызовы disk_open и detect_partition_table:
+ * - открывает диск по заданному пути;
+ * - определяет тип таблицы разделов (MBR, GPT или неизвестно);
+ * - возвращает диск открытым, если операция успешна.
+ *
+ * @param path Путь к файлу диска.
+ * @param disk Указатель на структуру Disk, которая будет заполнена при успешном открытии.
+ * @param type Указатель на переменную PartitionTableType, куда будет записан определённый тип.
+ * @return Код ошибки:
+ *         - ERR_OK – диск успешно открыт, тип определён;
+ *         - ERR_DISK_OPEN – не удалось открыть файл;
+ *         - ERR_DISK_SEEK – ошибка позиционирования при определении размера;
+ *         - ERR_DISK_READ – ошибка чтения первого сектора для определения типа;
+ *         - другие коды могут быть возвращены из disk_open.
+ */
+ErrorCode cmd_disk_open_and_detect(const char *path, Disk *disk, PartitionTableType *type);

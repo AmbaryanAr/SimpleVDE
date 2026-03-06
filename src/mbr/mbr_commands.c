@@ -104,3 +104,66 @@ void mbr_print_info(Disk *disk) {
                i+1, type, (status == 0x80) ? "active" : "inactive", lba, size);
     }
 }
+
+ErrorCode mbr_delete_partition(Disk *disk, int index) {
+    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
+    if (index < 0 || index >= 4) return ERR_INVALID_VALUE;
+
+    uint8_t sector[SECTOR_SIZE];
+    ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
+    if (err != ERR_OK) return err;
+
+    // Зануляем запись раздела
+    memset(sector + PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE,
+           0, PARTITION_ENTRY_SIZE);
+
+    return disk_write(disk, sector, SECTOR_SIZE, 0);
+}
+
+ErrorCode mbr_set_active(Disk *disk, int index) {
+    if (!disk || !disk->is_open)
+        return ERR_DISK_OPEN;
+    if (index < 0 || index >= 4)
+        return ERR_INVALID_VALUE;
+
+    uint8_t sector[SECTOR_SIZE];
+    ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
+    if (err != ERR_OK)
+        return err;
+
+    for (int i = 0; i < 4; i++) {
+        sector[PARTITION_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE] = 0x00;
+    }
+    sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE] = 0x80;
+
+    return disk_write(disk, sector, SECTOR_SIZE, 0);
+}
+
+ErrorCode mbr_set_partition_type(Disk *disk, int index, uint8_t type) {
+    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
+    if (index < 0 || index >= 4) return ERR_INVALID_VALUE;
+
+    uint8_t sector[SECTOR_SIZE];
+    ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
+    if (err != ERR_OK) return err;
+
+    sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4] = type;
+
+    return disk_write(disk, sector, SECTOR_SIZE, 0);
+}
+
+ErrorCode mbr_write_code(Disk *disk, const uint8_t *code, size_t code_size) {
+    if (!disk || !disk->is_open)
+        return ERR_DISK_OPEN;
+    if (code_size > PARTITION_TABLE_OFFSET)
+        return ERR_INVALID_VALUE;
+
+    uint8_t sector[SECTOR_SIZE];
+    ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
+    if (err != ERR_OK)
+        return err;
+
+    memcpy(sector, code, code_size);
+
+    return disk_write(disk, sector, SECTOR_SIZE, 0);
+}

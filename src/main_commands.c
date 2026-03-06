@@ -151,45 +151,123 @@ ErrorCode process_create_partition(CommandArgs *args) {
 }
 
 ErrorCode process_delete_partition(CommandArgs *args) {
-    printf("\n>>> STUB: process_delete_partition\n");
-    print_args_summary(args);
+    if (!args->has_disk_path || !args->has_part_index)
+        return ERR_MISSING_ARGUMENT;
 
-	if (!args->has_disk_path || !args->has_part_index)
-		return ERR_MISSING_ARGUMENT;
+    Disk disk;
+    PartitionTableType table_type;
+    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
+    if (err != ERR_OK) return err;
 
-    printf("ACTION: Would delete partition at index %s on disk '%s'\n", 
-           args->part_index_raw, args->disk_path);
-    return ERR_OK;
+    int index = atoi(args->part_index_raw) - 1; // пользовательский индекс с 1
+    if (index < 0 || index >= 4) { // для GPT проверка позже
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    if (table_type == PT_MBR) {
+        err = mbr_delete_partition(&disk, index);
+    } else if (table_type == PT_GPT) {
+        err = gpt_delete_partition(&disk, index);
+    } else {
+        err = ERR_INVALID_VALUE;
+    }
+
+    disk_close(&disk);
+    return err;
 }
 
 ErrorCode process_set_active(CommandArgs *args) {
-    printf("\n>>> STUB: process_set_active\n");
-    print_args_summary(args);
+    // Проверка наличия обязательных аргументов
+    if (!args->has_disk_path || !args->has_part_index || !args->has_op)
+        return ERR_MISSING_ARGUMENT;
 
-	if (!args->has_disk_path || !args->has_part_index || !args->has_op)
-		return ERR_MISSING_ARGUMENT;
-
-    if (strcmp(args->op_raw, "active") != 0 && strcmp(args->op_raw, "inactive") != 0) {
+    // Определяем, активный или неактивный режим
+    bool set_active;
+    if (strcmp(args->op_raw, "active") == 0) {
+        set_active = true;
+    } else if (strcmp(args->op_raw, "inactive") == 0) {
+        set_active = false;
+    } else {
         printf("ERROR: -op= must be 'active' or 'inactive' for set active\n");
         return ERR_INVALID_VALUE;
     }
 
-    const char *state = (strcmp(args->op_raw, "active") == 0) ? "active" : "inactive";
-    printf("ACTION: Would set partition at index %s on disk '%s' as %s\n", 
-           args->part_index_raw, args->disk_path, state);
-    return ERR_OK;
+    // Открываем диск и определяем тип таблицы разделов
+    Disk disk;
+    PartitionTableType table_type;
+    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
+    if (err != ERR_OK) {
+        return err;
+    }
+
+    // Парсим индекс раздела (пользователь вводит 1-4)
+    int index = atoi(args->part_index_raw) - 1;
+    if (index < 0 || index >= 4) {
+        printf("ERROR: partition index must be between 1 and 4\n");
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    // Действия в зависимости от типа таблицы
+    if (table_type == PT_MBR) {
+        if (set_active) {
+            err = mbr_set_active(&disk, index);
+        } else {
+            // Для неактивного просто сбрасываем флаг у указанного раздела
+            uint8_t sector[SECTOR_SIZE];
+            err = disk_read(&disk, sector, SECTOR_SIZE, 0);
+            if (err == ERR_OK) {
+                sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE] = 0x00;
+                err = disk_write(&disk, sector, SECTOR_SIZE, 0);
+            }
+        }
+    } else if (table_type == PT_GPT) {
+        printf("Error: Active flag is only supported for MBR partitions.\n");
+        err = ERR_INVALID_VALUE;
+    } else {
+        printf("Error: Unknown partition table type.\n");
+        err = ERR_INVALID_VALUE;
+    }
+
+    disk_close(&disk);
+    return err;
 }
 
 ErrorCode process_set_type(CommandArgs *args) {
-    printf("\n>>> STUB: process_set_type\n");
-    print_args_summary(args);
+    if (!args->has_disk_path || !args->has_part_index || !args->has_type)
+        return ERR_MISSING_ARGUMENT;
 
-	if (!args->has_disk_path || !args->has_part_index || !args->has_type)
-		return ERR_MISSING_ARGUMENT;
+    Disk disk;
+    PartitionTableType table_type;
+    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
+    if (err != ERR_OK) return err;
 
-    printf("ACTION: Would set type of partition at index %s on disk '%s' to %s\n", 
-           args->part_index_raw, args->disk_path, args->type_raw);
-    return ERR_OK;
+    int index = atoi(args->part_index_raw) - 1;
+    if (index < 0 || index >= 4) { // MBR ограничение, для GPT позже
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    if (table_type == PT_MBR) {
+        char *endptr;
+        unsigned long val = strtoul(args->type_raw, &endptr, 16);
+        if (*endptr != '\0' || val > 0xFF) {
+            printf("Error: Invalid partition type '%s'. Must be a hex byte (00-FF).\n", args->type_raw);
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
+        err = mbr_set_partition_type(&disk, index, (uint8_t)val);
+    } else if (table_type == PT_GPT) {
+        printf("Error: GPT partition type setting not yet implemented.\n");
+        err = ERR_INVALID_VALUE;
+    } else {
+        printf("Error: Unknown partition table type.\n");
+        err = ERR_INVALID_VALUE;
+    }
+
+    disk_close(&disk);
+    return err;
 }
 
 ErrorCode process_format(CommandArgs *args) {
@@ -205,15 +283,63 @@ ErrorCode process_format(CommandArgs *args) {
 }
 
 ErrorCode process_write_mbr_loader(CommandArgs *args) {
-    printf("\n>>> STUB: process_write_mbr_loader\n");
-    print_args_summary(args);
+    if (!args->has_disk_path || !args->has_file)
+        return ERR_MISSING_ARGUMENT;
 
-	if (!args->has_disk_path || !args->has_part_index || !args->has_file)
-		return ERR_MISSING_ARGUMENT;
+    // Открываем файл с кодом
+    FILE *f = fopen(args->file_raw, "rb");
+    if (!f) {
+        printf("Error: cannot open file '%s'\n", args->file_raw);
+        return ERR_GENERIC;
+    }
 
-    printf("ACTION: Would write MBR loader from file '%s' to partition at index %s on disk '%s'\n", 
-           args->file_raw, args->part_index_raw, args->disk_path);
-    return ERR_OK;
+    // Определяем размер файла
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    rewind(f);
+
+    if (file_size > PARTITION_TABLE_OFFSET) {
+        printf("Warning: file size (%ld) exceeds MBR bootstrap area (446 bytes). Truncating to 446 bytes.\n", file_size);
+        file_size = PARTITION_TABLE_OFFSET;
+    }
+
+    uint8_t buffer[PARTITION_TABLE_OFFSET];
+    size_t read_bytes = fread(buffer, 1, file_size, f);
+    fclose(f);
+
+    if (read_bytes != (size_t)file_size) {
+        printf("Error: failed to read file (expected %ld bytes, got %zu)\n", file_size, read_bytes);
+        return ERR_GENERIC;
+    }
+
+    // Открываем диск и определяем тип таблицы
+    Disk disk;
+    PartitionTableType table_type;
+    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
+    if (err != ERR_OK) {
+        if (err == ERR_DISK_OPEN)
+            printf("Error: cannot open disk file '%s'\n", args->disk_path);
+        else
+            printf("Error: failed to open disk (code %d)\n", err);
+        return err;
+    }
+
+    if (table_type != PT_MBR) {
+        printf("Error: Writing MBR code is only supported for MBR-partitioned disks.\n");
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    err = mbr_write_code(&disk, buffer, read_bytes);
+    disk_close(&disk);
+
+    if (err == ERR_OK) {
+        printf("MBR code successfully written (%zu bytes).\n", read_bytes);
+    } else {
+        printf("Error: failed to write MBR code (code %d).\n", err);
+    }
+
+    return err;
 }
 
 ErrorCode process_write_bpb_loader(CommandArgs *args) {

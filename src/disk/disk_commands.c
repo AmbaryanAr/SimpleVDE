@@ -59,6 +59,18 @@ static PartitionTableType detect_partition_table(Disk *disk) {
 }
 // ***
 
+ErrorCode cmd_disk_open_and_detect(const char *path, Disk *disk, PartitionTableType *type) {
+    if (!path || !disk || !type)
+        return ERR_NULL_POINTER;
+
+    ErrorCode err = disk_open(path, disk);
+    if (err != ERR_OK)
+        return err;
+
+    *type = detect_partition_table(disk);
+    return ERR_OK;
+}
+
 // Создание виртуального диска
 ErrorCode cmd_create_disk(CreateDiskParams *params) {
     printf("The process of creating a virtual disk:\n");

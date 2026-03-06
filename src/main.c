@@ -179,7 +179,7 @@ int main(int argc, char *argv[]) {
             ret =  process_format(&args);
 			goto cleanup;
         } else if (strcmp(args.op_raw, "write_mbr") == 0) {
-            ret =  process_write_mbr_loader(&args);
+            ret = process_write_mbr_loader(&args);
 			goto cleanup;
         } else if (strcmp(args.op_raw, "write_bpb") == 0) {
             ret =  process_write_bpb_loader(&args);

@@ -74,11 +74,32 @@ typedef struct {
 ErrorCode gpt_create(Disk *disk);
 
 // int gpt_creat_partition_table( ... );
-// int gpt_delete_partition_table( ... );
+/**
+ * Удаляет запись о разделе из таблицы GPT (GUID Partition Table) на открытом диске.
+ *
+ * Функция выполняет следующие действия:
+ * - читает заголовок GPT из второго сектора (LBA 1);
+ * - читает таблицу разделов, расположенную по адресу partition_entry_lba;
+ * - зануляет запись с указанным индексом;
+ * - пересчитывает CRC32 таблицы разделов и CRC32 заголовка GPT;
+ * - записывает обновлённую таблицу разделов в основное и резервное расположения;
+ * - записывает обновлённый заголовок GPT в основной (LBA 1) и резервный (последний сектор) экземпляры.
+ *
+ * @param disk  Указатель на открытый диск (структура Disk).
+ * @param index Индекс удаляемого раздела (от 0 до header.num_partition_entries - 1).
+ * @return Код ошибки:
+ *         - ERR_OK – раздел успешно удалён;
+ *         - ERR_DISK_OPEN – диск не открыт или передан нулевой указатель;
+ *         - ERR_INVALID_VALUE – индекс выходит за допустимые пределы;
+ *         - ERR_DISK_READ – ошибка чтения заголовка GPT или таблицы разделов;
+ *         - ERR_DISK_WRITE – ошибка записи обновлённых данных;
+ *         - ERR_GENERIC – ошибка выделения памяти или несоответствие сигнатуры.
+ */
+ErrorCode gpt_delete_partition(Disk *disk, int index);
 
 // Работа с GUID
-void guid_to_string(const uint8_t *guid, char *str);
-int guid_from_string(const char *str, uint8_t *guid);
+void gpt_guid_to_string(const uint8_t *guid, char *str);
+int gpt_guid_from_string(const char *str, uint8_t *guid);
 /**
  * Выводит информацию о GPT-таблице разделов на открытом диске.
  * Читает заголовок GPT из первого сектора (LBA 1) и отображает:
