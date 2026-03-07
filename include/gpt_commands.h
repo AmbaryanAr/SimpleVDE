@@ -73,7 +73,33 @@ typedef struct {
  */
 ErrorCode gpt_create(Disk *disk);
 
-// int gpt_creat_partition_table( ... );
+/**
+ * Создаёт новый раздел в таблице GPT на открытом диске.
+ *
+ * Функция читает заголовок GPT и таблицу разделов, находит свободную запись
+ * с заданным индексом (если индекс уже занят, возвращается ошибка),
+ * определяет стартовый LBA (вслед за последним существующим разделом),
+ * выделяет указанное количество секторов (если size_sectors == 0, занимает
+ * всё доступное место до конца области разделов), заполняет запись раздела
+ * (тип, GUID раздела, начальный и конечный LBA, атрибуты), пересчитывает
+ * CRC32 таблицы и заголовка, и записывает обновлённые структуры как в
+ * основное, так и в резервное расположение.
+ *
+ * @param disk         Указатель на открытый диск.
+ * @param index        Индекс нового раздела (от 0 до header.num_partition_entries-1).
+ * @param size_sectors Размер раздела в секторах. Если 0, занимает всё оставшееся свободное место.
+ * @param type_guid    Указатель на 16-байтовый GUID типа раздела (например, Linux filesystem).
+ * @return Код ошибки:
+ *         - ERR_OK – раздел успешно создан;
+ *         - ERR_DISK_OPEN – диск не открыт;
+ *         - ERR_INVALID_VALUE – неверный индекс, запись занята, недостаточно места,
+ *           или диск не содержит корректной GPT;
+ *         - ERR_DISK_READ – ошибка чтения заголовка или таблицы разделов;
+ *         - ERR_DISK_WRITE – ошибка записи обновлённых структур;
+ *         - ERR_GENERIC – ошибка выделения памяти.
+ */
+ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, const uint8_t *type_guid);
+
 /**
  * Удаляет запись о разделе из таблицы GPT (GUID Partition Table) на открытом диске.
  *
@@ -96,6 +122,23 @@ ErrorCode gpt_create(Disk *disk);
  *         - ERR_GENERIC – ошибка выделения памяти или несоответствие сигнатуры.
  */
 ErrorCode gpt_delete_partition(Disk *disk, int index);
+
+/**
+ * Изменяет GUID типа существующего раздела в таблице GPT.
+ *
+ * @param disk      Указатель на открытый диск.
+ * @param index     Индекс раздела (0..header.num_partition_entries-1).
+ * @param type_guid Новый GUID типа (16 байт).
+ * @return Код ошибки:
+ *         - ERR_OK – тип успешно изменён;
+ *         - ERR_DISK_OPEN – диск не открыт;
+ *         - ERR_INVALID_VALUE – неверный индекс, раздел не существует,
+ *           диск не содержит корректной GPT;
+ *         - ERR_DISK_READ – ошибка чтения;
+ *         - ERR_DISK_WRITE – ошибка записи;
+ *         - ERR_GENERIC – ошибка выделения памяти.
+ */
+ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid);
 
 // Работа с GUID
 void gpt_guid_to_string(const uint8_t *guid, char *str);

@@ -191,33 +191,27 @@ ErrorCode process_create_partition(CommandArgs *args) {
 	}
 
     // Парсим размер (если не указан, будет 0 – занять всё свободное место)
-    uint32_t size_sectors = 0;
-    if (args->has_size) {
-        uint64_t size_mb;
-        if (!parse_number(args->size_raw, &size_mb)) {
-            printf("ERROR: invalid size format.\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        uint64_t size_bytes = size_mb * 1024 * 1024;
-        if (size_bytes % SECTOR_SIZE != 0) {
-            printf("Warning: size not multiple of sector size (%d), rounding down.\n", SECTOR_SIZE);
-        }
-        uint64_t tmp = size_bytes / SECTOR_SIZE;
-        if (tmp > UINT32_MAX) {
-            printf("ERROR: size too large for MBR partition (max 2 TiB).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        size_sectors = (uint32_t)tmp;
-        if (size_sectors == 0) {
-            printf("ERROR: size too small (must be at least one sector).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-    } else {
-        printf("No size specified, partition will occupy all free space.\n");
-    }
+	uint64_t size_sectors = 0;
+	if (args->has_size) {
+		uint64_t size_mb;
+		if (!parse_number(args->size_raw, &size_mb)) {
+			printf("ERROR: invalid size format.\n");
+			disk_close(&disk);
+			return ERR_INVALID_VALUE;
+		}
+		uint64_t size_bytes = size_mb * 1024 * 1024;
+		if (size_bytes % SECTOR_SIZE != 0) {
+			printf("Warning: size not multiple of sector size (%d), rounding down.\n", SECTOR_SIZE);
+		}
+		size_sectors = size_bytes / SECTOR_SIZE;
+		if (size_sectors == 0) {
+			printf("ERROR: size too small (must be at least one sector).\n");
+			disk_close(&disk);
+			return ERR_INVALID_VALUE;
+		}
+	} else {
+		printf("No size specified, partition will occupy all free space.\n");
+	}
 
     if (table_type == PT_MBR) {
         if (index >= 4) {
@@ -239,16 +233,42 @@ ErrorCode process_create_partition(CommandArgs *args) {
             fs_type = (uint8_t)val;
         }
 
-        err = mbr_create_partition(&disk, index, size_sectors, fs_type);
+		if (size_sectors > UINT32_MAX) {
+			printf("ERROR: size too large for MBR partition (max 2 TiB).\n");
+			disk_close(&disk);
+			return ERR_INVALID_VALUE;
+		}
+		uint32_t mbr_size = (uint32_t)size_sectors;
+		err = mbr_create_partition(&disk, index, mbr_size, fs_type);
+
         if (err == ERR_OK) {
             printf("Partition %d created successfully.\n", index + 1);
         } else {
             printf("ERROR: failed to create partition (code %d).\n", err);
         }
     } else if (table_type == PT_GPT) {
-        printf("ERROR: GPT partition creation not yet implemented.\n");
-        err = ERR_INVALID_VALUE;
-    } else {
+		// Для GPT индекс может быть до 128, проверять не здесь (функция сама проверит)
+		uint8_t fs_guid[16];
+		if (args->has_type) {
+			if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
+				printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
+				disk_close(&disk);
+				return ERR_INVALID_VALUE;
+			}
+		} else {
+			// GUID по умолчанию (Linux filesystem)
+			uint8_t default_guid[16] = GPT_TYPE_LINUX_FILESYSTEM;
+			memcpy(fs_guid, default_guid, 16);
+		}
+
+		// Размер в секторах (уже посчитан ранее, в size_sectors)
+		err = gpt_create_partition(&disk, index, size_sectors, fs_guid);
+		if (err == ERR_OK) {
+			printf("Partition %d created successfully.\n", index + 1);
+		} else {
+			printf("ERROR: failed to create GPT partition (code %d).\n", err);
+		}
+	} else {
         printf("ERROR: unknown partition table type.\n");
         err = ERR_INVALID_VALUE;
     }
@@ -258,44 +278,58 @@ ErrorCode process_create_partition(CommandArgs *args) {
 }
 
 ErrorCode process_delete_partition(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-	if (err != ERR_OK) {
-		if (err == ERR_DISK_OPEN)
-			printf("Error: cannot open disk file '%s'\n", args->disk_path);
-		else
-			printf("Error: failed to open disk (code %d)\n", err);
-		return err;
-	}
+    if (err != ERR_OK) {
+        if (err == ERR_DISK_OPEN)
+            printf("Error: cannot open disk file '%s'\n", args->disk_path);
+        else
+            printf("Error: failed to open disk (code %d)\n", err);
+        return err;
+    }
 
-    int index = atoi(args->part_index_raw) - 1; // пользовательский индекс с 1
-    if (index < 0 || index >= 4) { // для GPT проверка позже
+    int index = atoi(args->part_index_raw) - 1;
+    if (index < 0) {
+        printf("Error: invalid partition index.\n");
         disk_close(&disk);
         return ERR_INVALID_VALUE;
     }
 
     if (table_type == PT_MBR) {
+        if (index >= 4) {
+            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
         err = mbr_delete_partition(&disk, index);
-		if (err == ERR_OK) {
-			printf("Partition %d deleted successfully.\n", index + 1);
-		} else if (err == ERR_INVALID_VALUE) {
-			printf("Error: partition %d does not exist.\n", index + 1);
-		} else {
-			printf("Error: failed to delete partition (code %d).\n", err);
-		}
+        if (err == ERR_OK) {
+            printf("Partition %d deleted successfully.\n", index + 1);
+        } else if (err == ERR_INVALID_VALUE) {
+            printf("Error: partition %d does not exist.\n", index + 1);
+        } else {
+            printf("Error: failed to delete partition (code %d).\n", err);
+        }
     } else if (table_type == PT_GPT) {
         err = gpt_delete_partition(&disk, index);
+        if (err == ERR_OK) {
+            printf("Partition %d deleted successfully.\n", index + 1);
+        } else if (err == ERR_INVALID_VALUE) {
+            printf("Error: partition %d does not exist or invalid index.\n", index + 1);
+        } else {
+            printf("Error: failed to delete partition (code %d).\n", err);
+        }
     } else {
+        printf("Error: unknown partition table type.\n");
         err = ERR_INVALID_VALUE;
     }
 
@@ -420,11 +454,17 @@ ErrorCode process_set_type(CommandArgs *args) {
 		return err;
 	}
 
-    int index = atoi(args->part_index_raw) - 1;
-    if (index < 0 || index >= 4) { // MBR ограничение, для GPT позже
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
+	int index = atoi(args->part_index_raw) - 1;
+	if (index < 0) {
+		printf("Error: invalid partition index.\n");
+		disk_close(&disk);
+		return ERR_INVALID_VALUE;
+	}
+	if (table_type == PT_MBR && index >= 4) {
+		printf("Error: MBR supports only 4 partitions (index 1-4).\n");
+		disk_close(&disk);
+		return ERR_INVALID_VALUE;
+	}
 
     if (table_type == PT_MBR) {
         char *endptr;
@@ -443,9 +483,21 @@ ErrorCode process_set_type(CommandArgs *args) {
 			printf("Error: failed to delete partition (code %d).\n", err);
 		}
     } else if (table_type == PT_GPT) {
-        printf("Error: GPT partition type setting not yet implemented.\n");
-        err = ERR_INVALID_VALUE;
-    } else {
+		uint8_t fs_guid[16];
+		if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
+			printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
+			disk_close(&disk);
+			return ERR_INVALID_VALUE;
+		}
+		err = gpt_set_partition_type(&disk, index, fs_guid);
+		if (err == ERR_OK) {
+			printf("Partition %d type changed successfully.\n", index + 1);
+		} else if (err == ERR_INVALID_VALUE) {
+			printf("Error: partition %d does not exist or invalid GUID.\n", index + 1);
+		} else {
+			printf("Error: failed to change partition type (code %d).\n", err);
+		}
+	} else {
         printf("Error: Unknown partition table type.\n");
         err = ERR_INVALID_VALUE;
     }
