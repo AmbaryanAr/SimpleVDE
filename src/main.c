@@ -95,6 +95,10 @@ int main(int argc, char *argv[]) {
             args.type_raw = strdup(value);
             args.has_type = true;
         }
+		else if (extract_value(argv[i], "-fs=", value, sizeof(value))) {
+            args.type_raw = strdup(value);
+            args.has_type = true;
+        }
         else if (extract_value(argv[i], "-file=", value, sizeof(value))) {
             args.file_raw = strdup(value);
             args.has_file = true;

@@ -54,55 +54,71 @@ ErrorCode mbr_create(Disk *disk) {
     return ERR_OK;
 }
 
-// *** шпаргалки на будущее ***
-
 // Создание раздела (выбор свободного места)
-// ErrorCode cmd_mbr_create_partition( ... ) {
+ErrorCode mbr_create_partition(Disk *disk, int index, uint32_t size_sectors, uint8_t type) {
+    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
+    if (index < 0 || index >= 4) return ERR_INVALID_VALUE;
 
-// 	return ERR_OK;
-// }
-
-// Удаление раздела
-// ErrorCode cmd_mbr_delete_partition( ... ) {
-
-// 	return ERR_OK;
-// }
-
-// Установить тип раздела
-// ErrorCode cmd_mbr_set_partition_type( ... ) {
-
-// 	return ERR_OK; 
-// }
-
-// Сделать раздел активным или неактивным и отключить другие если какой то из них активен
-// ErrorCode cmd_mbr_set_active_partition( ... ) {
-
-// 	return ERR_OK;
-// }
-
-void mbr_print_info(Disk *disk) {
     uint8_t sector[SECTOR_SIZE];
-    if (disk_read(disk, sector, SECTOR_SIZE, 0) != ERR_OK) {
-        printf(" -  Error: cannot read MBR sector.\n");
-        return;
+    ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
+    if (err != ERR_OK) return err;
+
+    // Проверяем, свободна ли целевая запись
+    if (sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4] != 0) {
+        printf(" - ERROR: partition entry %d is already in use.\n", index + 1);
+        return ERR_INVALID_VALUE;
     }
 
-    int part_count = 0;
-    for (int i = 0; i < 4; i++) {
-        uint8_t type = sector[PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 4];
-        if (type != 0x00) part_count++;
-    }
-    printf(" -  Number of primary partitions: %d\n", part_count);
+    uint64_t total_sectors = disk->size / SECTOR_SIZE;
 
+    // Определяем следующий доступный LBA (конец последнего существующего раздела)
+    uint64_t next_lba = 2048; // стандартное смещение для первого раздела
     for (int i = 0; i < 4; i++) {
-        uint8_t type = sector[PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 4];
-        if (type == 0x00) continue;
-        uint8_t status = sector[PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE]; // 0x80 = active
-        uint32_t lba = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 8);
-        uint32_t size = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 12);
-        printf(" -  Partition %d: type=0x%02X, %s, start LBA=%u, size=%u sectors\n",
-               i+1, type, (status == 0x80) ? "active" : "inactive", lba, size);
+        uint8_t part_type = sector[PARTITION_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE + 4];
+        if (part_type != 0) {
+            uint32_t start = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE + 8);
+            uint32_t size = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE + 12);
+            uint64_t end = (uint64_t)start + size;
+            if (end > next_lba) next_lba = end;
+        }
     }
+
+    // Если размер не указан, занимаем всё оставшееся место
+    uint64_t new_size = size_sectors;
+    if (new_size == 0) {
+        new_size = total_sectors - next_lba;
+        if (new_size > UINT32_MAX) new_size = UINT32_MAX; // MBR ограничение 32 бита
+    }
+
+    // Проверки границ
+    if (next_lba + new_size > total_sectors) {
+        printf("ERROR: not enough free space.\n");
+        return ERR_INVALID_VALUE;
+    }
+    if (new_size > UINT32_MAX) {
+        printf("ERROR: partition size too large for MBR.\n");
+        return ERR_INVALID_VALUE;
+    }
+    if (next_lba > UINT32_MAX) {
+        printf("ERROR: start LBA too large for MBR.\n");
+        return ERR_INVALID_VALUE;
+    }
+
+    // Заполняем запись раздела
+    uint8_t *entry = sector + PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE;
+    entry[0] = 0;                          // boot flag (неактивен)
+    // CHS-адреса: для простоты используем "LBA-only" значения
+    entry[1] = 0;                          // head start
+    entry[2] = 0;                          // sector/cylinder
+    entry[3] = 0;                          // cylinder
+    entry[4] = type;                       // тип
+    entry[5] = 0xFE;                       // head end (максимум)
+    entry[6] = 0xFF;                       // sector/cylinder end
+    entry[7] = 0xFF;                       // cylinder end
+    *(uint32_t*)(entry + 8) = (uint32_t)next_lba;   // LBA start
+    *(uint32_t*)(entry + 12) = (uint32_t)new_size;  // размер в секторах
+
+    return disk_write(disk, sector, SECTOR_SIZE, 0);
 }
 
 ErrorCode mbr_delete_partition(Disk *disk, int index) {
@@ -166,4 +182,29 @@ ErrorCode mbr_write_code(Disk *disk, const uint8_t *code, size_t code_size) {
     memcpy(sector, code, code_size);
 
     return disk_write(disk, sector, SECTOR_SIZE, 0);
+}
+
+void mbr_print_info(Disk *disk) {
+    uint8_t sector[SECTOR_SIZE];
+    if (disk_read(disk, sector, SECTOR_SIZE, 0) != ERR_OK) {
+        printf(" -  Error: cannot read MBR sector.\n");
+        return;
+    }
+
+    int part_count = 0;
+    for (int i = 0; i < 4; i++) {
+        uint8_t type = sector[PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 4];
+        if (type != 0x00) part_count++;
+    }
+    printf(" -  Number of primary partitions: %d\n", part_count);
+
+    for (int i = 0; i < 4; i++) {
+        uint8_t type = sector[PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 4];
+        if (type == 0x00) continue;
+        uint8_t status = sector[PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE]; // 0x80 = active
+        uint32_t lba = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 8);
+        uint32_t size = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + i*PARTITION_ENTRY_SIZE + 12);
+        printf(" -  Partition %d: type=0x%02X, %s, start LBA=%u, size=%u sectors\n",
+               i+1, type, (status == 0x80) ? "active" : "inactive", lba, size);
+    }
 }

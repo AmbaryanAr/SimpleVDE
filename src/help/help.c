@@ -14,11 +14,11 @@ void print_help(void) {
     printf("  --disk -op=info -path=DISK_PATH                                           Show disk information\n");
     printf("  --disk -op=read -path=DISK_PATH -offset=OFFSET -size=SIZE                 Read disk sector\n");
     printf("\nPartition operations:\n");
-    printf("  --partition -disk=DISK_PATH -index=IDX -op=create -size=SIZE -type=MBR|GPT Create partition\n");
+    printf("  --partition -disk=DISK_PATH -index=IDX -op=create -size=SIZE [-fs=FSTYPE] Create partition\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=delete                         Delete partition\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=active|inactive                Set partition active/bootable\n");
-    printf("  --partition -disk=DISK_PATH -index=IDX -op=set_type -type=FAT32           Change partition type\n");
-    printf("  --partition -disk=DISK_PATH -index=IDX -op=format -type=FAT32             Format partition\n");
+    printf("  --partition -disk=DISK_PATH -index=IDX -op=set_type -fs=FSTYPE            Change partition type\n");
+    printf("  --partition -disk=DISK_PATH -index=IDX -op=format -fs=FSTYPE              Format partition\n");
     printf("  --partition -disk=DISK_PATH -op=write_mbr -file=FILE                      Write MBR code\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=write_bpb -file=FILE           Write BPB code\n");
     printf("\nFile system operations:\n");

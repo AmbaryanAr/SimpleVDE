@@ -141,3 +141,19 @@ ErrorCode mbr_set_partition_type(Disk *disk, int index, uint8_t type);
  *         - ERR_DISK_WRITE – ошибка записи MBR.
  */
 ErrorCode mbr_write_code(Disk *disk, const uint8_t *code, size_t code_size);
+
+/**
+ * Создаёт новый раздел в MBR (Master Boot Record) на открытом диске.
+ *
+ * @param disk         Указатель на открытый диск.
+ * @param index        Индекс нового раздела (0–3).
+ * @param size_sectors Размер раздела в секторах. Если 0, занять всё свободное место до конца диска.
+ * @param type         Тип раздела (например, 0x83 для Linux).
+ * @return Код ошибки:
+ *         - ERR_OK – раздел успешно создан;
+ *         - ERR_DISK_OPEN – диск не открыт;
+ *         - ERR_INVALID_VALUE – неверный индекс, запись занята, недостаточно места или другой недопустимый параметр;
+ *         - ERR_DISK_READ – ошибка чтения MBR;
+ *         - ERR_DISK_WRITE – ошибка записи MBR.
+ */
+ErrorCode mbr_create_partition(Disk *disk, int index, uint32_t size_sectors, uint8_t type);

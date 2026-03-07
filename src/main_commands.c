@@ -138,16 +138,94 @@ ErrorCode process_disk_read(CommandArgs *args) {
     return cmd_disk_read_sector(args->path, offset_sectors, size_sectors);
 }
 
-// ---------- Заглушки для операций с разделами ----------
+// ---------- Функции для операций с разделами ----------
 ErrorCode process_create_partition(CommandArgs *args) {
-    printf("\n>>> STUB: process_create_partition\n");
-    print_args_summary(args);
-	if (!args->has_disk_path || !args->has_part_index || !args->has_size || !args->has_type)
+	print_args_summary(args);
+    // Проверяем только обязательные аргументы
+    if (!args->has_disk_path || !args->has_part_index)
 		return ERR_MISSING_ARGUMENT;
 
-    printf("ACTION: Would create %s partition at index %s on disk '%s' with size %s\n", 
-           args->type_raw, args->part_index_raw, args->disk_path, args->size_raw);
-    return ERR_OK;
+    // Парсим индекс (пользовательский счёт с 1)
+    int index = atoi(args->part_index_raw) - 1;
+    if (index < 0) {
+        printf("ERROR: invalid partition index.\n");
+        return ERR_INVALID_VALUE;
+    }
+
+    // Открываем диск и определяем тип таблицы
+    Disk disk;
+    PartitionTableType table_type;
+    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
+    if (err != ERR_OK) {
+        printf("ERROR: cannot open disk '%s'.\n", args->disk_path);
+        return err;
+    }
+
+    // Парсим размер (если не указан, будет 0 – занять всё свободное место)
+    uint32_t size_sectors = 0;
+    if (args->has_size) {
+        uint64_t size_mb;
+        if (!parse_number(args->size_raw, &size_mb)) {
+            printf("ERROR: invalid size format.\n");
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
+        uint64_t size_bytes = size_mb * 1024 * 1024;
+        if (size_bytes % SECTOR_SIZE != 0) {
+            printf("Warning: size not multiple of sector size (%d), rounding down.\n", SECTOR_SIZE);
+        }
+        uint64_t tmp = size_bytes / SECTOR_SIZE;
+        if (tmp > UINT32_MAX) {
+            printf("ERROR: size too large for MBR partition (max 2 TiB).\n");
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
+        size_sectors = (uint32_t)tmp;
+        if (size_sectors == 0) {
+            printf("ERROR: size too small (must be at least one sector).\n");
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
+    } else {
+        printf("No size specified, partition will occupy all free space.\n");
+    }
+
+    if (table_type == PT_MBR) {
+        if (index >= 4) {
+            printf("ERROR: MBR supports only 4 partitions (index 1-4).\n");
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
+
+        // Определяем тип файловой системы
+        uint8_t fs_type = 0x83; // умолчание для MBR (Linux)
+        if (args->has_type) { // сюда попадёт значение из -fs= или -type=
+            char *endptr;
+            unsigned long val = strtoul(args->type_raw, &endptr, 16);
+            if (*endptr != '\0' || val > 0xFF) {
+                printf("ERROR: invalid filesystem type '%s'. Must be a hex byte (00-FF).\n", args->type_raw);
+                disk_close(&disk);
+                return ERR_INVALID_VALUE;
+            }
+            fs_type = (uint8_t)val;
+        }
+
+        err = mbr_create_partition(&disk, index, size_sectors, fs_type);
+        if (err == ERR_OK) {
+            printf("Partition %d created successfully.\n", index + 1);
+        } else {
+            printf("ERROR: failed to create partition (code %d).\n", err);
+        }
+    } else if (table_type == PT_GPT) {
+        printf("ERROR: GPT partition creation not yet implemented.\n");
+        err = ERR_INVALID_VALUE;
+    } else {
+        printf("ERROR: unknown partition table type.\n");
+        err = ERR_INVALID_VALUE;
+    }
+	
+    disk_close(&disk);
+    return err;
 }
 
 ErrorCode process_delete_partition(CommandArgs *args) {
