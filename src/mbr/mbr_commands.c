@@ -128,7 +128,12 @@ ErrorCode mbr_delete_partition(Disk *disk, int index) {
     uint8_t sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
     if (err != ERR_OK) return err;
-
+    
+	// Проверяем, существует ли раздел
+    uint8_t part_type = sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4];
+    if (part_type == 0)
+        return ERR_INVALID_VALUE;
+	
     // Зануляем запись раздела
     memset(sector + PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE,
            0, PARTITION_ENTRY_SIZE);
@@ -147,10 +152,17 @@ ErrorCode mbr_set_active(Disk *disk, int index) {
     if (err != ERR_OK)
         return err;
 
-    for (int i = 0; i < 4; i++) {
-        sector[PARTITION_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE] = 0x00;
-    }
-    sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE] = 0x80;
+    // Проверяем, существует ли раздел
+    uint8_t part_type = sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4];
+    if (part_type == 0)
+        return ERR_INVALID_VALUE;
+
+	// Сбрасываем флаг у всех разделов
+    for (int i = 0; i < 4; i++)
+        sector[PARTITION_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE] = PARTITION_NON_BOOTABLE;
+	
+	// Устанавливаем флаг у нужного раздела
+    sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE] = PARTITION_BOOTABLE;
 
     return disk_write(disk, sector, SECTOR_SIZE, 0);
 }
@@ -162,6 +174,11 @@ ErrorCode mbr_set_partition_type(Disk *disk, int index, uint8_t type) {
     uint8_t sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
     if (err != ERR_OK) return err;
+
+    // Проверяем, существует ли раздел
+    uint8_t old_type = sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4];
+    if (old_type == 0)
+        return ERR_INVALID_VALUE;
 
     sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4] = type;
 

@@ -85,8 +85,18 @@ static bool parse_integer(const char *str, uint64_t *out) {
 
 // ---------- Функции для дисковых операций ----------
 ErrorCode process_create_disk(CommandArgs *args) {
-    if (!args->has_path || !args->has_size || !args->has_type)
-        return ERR_MISSING_ARGUMENT;
+	if (!args->has_path) {
+		printf("Error: missing -path= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_size) {
+		printf("Error: missing -size= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_type) {
+		printf("Error: missing -type= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
 
     CreateDiskParams params;
 
@@ -110,15 +120,27 @@ ErrorCode process_create_disk(CommandArgs *args) {
 }
 
 ErrorCode process_disk_info(CommandArgs *args) {
-    if (!args->has_path)
-        return ERR_MISSING_ARGUMENT;
+    if (!args->has_path){
+		printf("Error: missing -path= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+
     return cmd_disk_info(args->path);
 }
 
 ErrorCode process_disk_read(CommandArgs *args) {
-    if (!args->has_path || !args->has_offset || !args->has_size) {
-        return ERR_MISSING_ARGUMENT;
-    }
+	if (!args->has_path) {
+		printf("Error: missing -path= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_offset) {
+		printf("Error: missing -offset= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_size) {
+		printf("Error: missing -size= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
 
     // Парсинг offset и size (в секторах)
     uint64_t offset_sectors, size_sectors;
@@ -140,10 +162,14 @@ ErrorCode process_disk_read(CommandArgs *args) {
 
 // ---------- Функции для операций с разделами ----------
 ErrorCode process_create_partition(CommandArgs *args) {
-	print_args_summary(args);
-    // Проверяем только обязательные аргументы
-    if (!args->has_disk_path || !args->has_part_index)
+	if (!args->has_disk_path) {
+		printf("Error: missing -disk= parameter.\n");
 		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_part_index) {
+		printf("Error: missing -index= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
 
     // Парсим индекс (пользовательский счёт с 1)
     int index = atoi(args->part_index_raw) - 1;
@@ -156,10 +182,13 @@ ErrorCode process_create_partition(CommandArgs *args) {
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        printf("ERROR: cannot open disk '%s'.\n", args->disk_path);
-        return err;
-    }
+	if (err != ERR_OK) {
+		if (err == ERR_DISK_OPEN)
+			printf("Error: cannot open disk file '%s'\n", args->disk_path);
+		else
+			printf("Error: failed to open disk (code %d)\n", err);
+		return err;
+	}
 
     // Парсим размер (если не указан, будет 0 – занять всё свободное место)
     uint32_t size_sectors = 0;
@@ -229,13 +258,25 @@ ErrorCode process_create_partition(CommandArgs *args) {
 }
 
 ErrorCode process_delete_partition(CommandArgs *args) {
-    if (!args->has_disk_path || !args->has_part_index)
-        return ERR_MISSING_ARGUMENT;
+	if (!args->has_disk_path) {
+		printf("Error: missing -disk= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_part_index) {
+		printf("Error: missing -index= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
 
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) return err;
+	if (err != ERR_OK) {
+		if (err == ERR_DISK_OPEN)
+			printf("Error: cannot open disk file '%s'\n", args->disk_path);
+		else
+			printf("Error: failed to open disk (code %d)\n", err);
+		return err;
+	}
 
     int index = atoi(args->part_index_raw) - 1; // пользовательский индекс с 1
     if (index < 0 || index >= 4) { // для GPT проверка позже
@@ -245,6 +286,13 @@ ErrorCode process_delete_partition(CommandArgs *args) {
 
     if (table_type == PT_MBR) {
         err = mbr_delete_partition(&disk, index);
+		if (err == ERR_OK) {
+			printf("Partition %d deleted successfully.\n", index + 1);
+		} else if (err == ERR_INVALID_VALUE) {
+			printf("Error: partition %d does not exist.\n", index + 1);
+		} else {
+			printf("Error: failed to delete partition (code %d).\n", err);
+		}
     } else if (table_type == PT_GPT) {
         err = gpt_delete_partition(&disk, index);
     } else {
@@ -256,9 +304,18 @@ ErrorCode process_delete_partition(CommandArgs *args) {
 }
 
 ErrorCode process_set_active(CommandArgs *args) {
-    // Проверка наличия обязательных аргументов
-    if (!args->has_disk_path || !args->has_part_index || !args->has_op)
-        return ERR_MISSING_ARGUMENT;
+	if (!args->has_disk_path) {
+		printf("Error: missing -disk= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_part_index) {
+		printf("Error: missing -index= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_op) {
+		printf("Error: missing -op= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
 
     // Определяем, активный или неактивный режим
     bool set_active;
@@ -275,9 +332,13 @@ ErrorCode process_set_active(CommandArgs *args) {
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        return err;
-    }
+	if (err != ERR_OK) {
+		if (err == ERR_DISK_OPEN)
+			printf("Error: cannot open disk file '%s'\n", args->disk_path);
+		else
+			printf("Error: failed to open disk (code %d)\n", err);
+		return err;
+	}
 
     // Парсим индекс раздела (пользователь вводит 1-4)
     int index = atoi(args->part_index_raw) - 1;
@@ -290,14 +351,36 @@ ErrorCode process_set_active(CommandArgs *args) {
     // Действия в зависимости от типа таблицы
     if (table_type == PT_MBR) {
         if (set_active) {
-            err = mbr_set_active(&disk, index);
-        } else {
+			err = mbr_set_active(&disk, index);
+			if (err == ERR_OK) {
+				printf("Partition %d activated successfully.\n", index + 1);
+			} else if (err == ERR_INVALID_VALUE) {
+				printf("Error: partition %d does not exist.\n", index + 1);
+			} else {
+				printf("Error: failed to activate partition (code %d).\n", err);
+			}
+		} else {
             // Для неактивного просто сбрасываем флаг у указанного раздела
             uint8_t sector[SECTOR_SIZE];
             err = disk_read(&disk, sector, SECTOR_SIZE, 0);
+            if (err != ERR_OK) {
+                printf("Error: cannot read MBR.\n");
+                disk_close(&disk);
+                return err;
+            }
+            // Проверим, существует ли раздел (тип не 0)
+            uint8_t part_type = sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4];
+            if (part_type == 0) {
+                printf("Warning: partition %d does not exist (type=0). Nothing to deactivate.\n", index + 1);
+                disk_close(&disk);
+                return ERR_OK;
+            }
+            sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE] = 0x00;
+            err = disk_write(&disk, sector, SECTOR_SIZE, 0);
             if (err == ERR_OK) {
-                sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE] = 0x00;
-                err = disk_write(&disk, sector, SECTOR_SIZE, 0);
+                printf("Partition %d deactivated successfully.\n", index + 1);
+            } else {
+                printf("Error: failed to deactivate partition (code %d).\n", err);
             }
         }
     } else if (table_type == PT_GPT) {
@@ -313,13 +396,29 @@ ErrorCode process_set_active(CommandArgs *args) {
 }
 
 ErrorCode process_set_type(CommandArgs *args) {
-    if (!args->has_disk_path || !args->has_part_index || !args->has_type)
-        return ERR_MISSING_ARGUMENT;
+	if (!args->has_disk_path) {
+		printf("Error: missing -disk= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_part_index) {
+		printf("Error: missing -index= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_type) {
+		printf("Error: missing -fs= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
 
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) return err;
+	if (err != ERR_OK) {
+		if (err == ERR_DISK_OPEN)
+			printf("Error: cannot open disk file '%s'\n", args->disk_path);
+		else
+			printf("Error: failed to open disk (code %d)\n", err);
+		return err;
+	}
 
     int index = atoi(args->part_index_raw) - 1;
     if (index < 0 || index >= 4) { // MBR ограничение, для GPT позже
@@ -336,6 +435,13 @@ ErrorCode process_set_type(CommandArgs *args) {
             return ERR_INVALID_VALUE;
         }
         err = mbr_set_partition_type(&disk, index, (uint8_t)val);
+		if (err == ERR_OK) {
+			printf("Partition %d deleted successfully.\n", index + 1);
+		} else if (err == ERR_INVALID_VALUE) {
+			printf("Error: partition %d does not exist.\n", index + 1);
+		} else {
+			printf("Error: failed to delete partition (code %d).\n", err);
+		}
     } else if (table_type == PT_GPT) {
         printf("Error: GPT partition type setting not yet implemented.\n");
         err = ERR_INVALID_VALUE;
@@ -361,8 +467,14 @@ ErrorCode process_format(CommandArgs *args) {
 }
 
 ErrorCode process_write_mbr_loader(CommandArgs *args) {
-    if (!args->has_disk_path || !args->has_file)
-        return ERR_MISSING_ARGUMENT;
+	if (!args->has_disk_path) {
+		printf("Error: missing -disk= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
+	if (!args->has_file) {
+		printf("Error: missing -file= parameter.\n");
+		return ERR_MISSING_ARGUMENT;
+	}
 
     // Открываем файл с кодом
     FILE *f = fopen(args->file_raw, "rb");
@@ -394,13 +506,13 @@ ErrorCode process_write_mbr_loader(CommandArgs *args) {
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
-        return err;
-    }
+	if (err != ERR_OK) {
+		if (err == ERR_DISK_OPEN)
+			printf("Error: cannot open disk file '%s'\n", args->disk_path);
+		else
+			printf("Error: failed to open disk (code %d)\n", err);
+		return err;
+	}
 
     if (table_type != PT_MBR) {
         printf("Error: Writing MBR code is only supported for MBR-partitioned disks.\n");
