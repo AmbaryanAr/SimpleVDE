@@ -57,6 +57,14 @@ typedef struct {
 #define GPT_TYPE_WINDOWS_BASIC_DATA    {0xA2,0xA0,0xD0,0xEB,0xE5,0xB9,0x33,0x44,0x87,0xC0,0x68,0xB6,0xB7,0x26,0x99,0xC7}
 
 /**
+ * Преобразует имя файловой системы (например, "linux", "efi") в GUID.
+ * @param name Имя файловой системы (регистр не учитывается).
+ * @param guid  Указатель на массив из 16 байт для записи GUID.
+ * @return 0 при успехе, -1 если имя не найдено.
+ */
+int gpt_type_from_name(const char *name, uint8_t *guid);
+
+/**
  * Создаёт GPT (GUID Partition Table) на открытом диске.
  * Записывает защитный MBR в первый сектор, заголовок GPT во второй сектор,
  * пустую таблицу разделов (обычно в секторах 2–33) и их резервные копии

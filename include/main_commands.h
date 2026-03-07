@@ -2,6 +2,8 @@
 
 #include "help.h"
 #include "disk_commands.h"
+#include "mbr_commands.h"
+#include "gpt_commands.h"
 #include "error_code.h"
 #include <stdbool.h>
 

@@ -114,7 +114,30 @@ static int gpt_initialize(MBR *mbr, GPTHeader *header, uint64_t disk_sectors, ui
 
     return 0;
 }
+
+static const struct {
+    const char *name;
+    uint8_t guid[16];
+} gpt_type_names[] = {
+    {"linux",      GPT_TYPE_LINUX_FILESYSTEM},
+    {"efi",        GPT_TYPE_EFI_SYSTEM},
+    {"swap",       GPT_TYPE_LINUX_SWAP},
+    {"lvm",        GPT_TYPE_LINUX_LVM},
+    {"windows",    GPT_TYPE_WINDOWS_BASIC_DATA},
+    {NULL, {0}}
+};
 // ***
+
+int gpt_type_from_name(const char *name, uint8_t *guid) {
+    for (int i = 0; gpt_type_names[i].name != NULL; i++) {
+        if (strcasecmp(name, gpt_type_names[i].name) == 0) {
+            memcpy(guid, gpt_type_names[i].guid, 16);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 
 ErrorCode gpt_create(Disk *disk) {
     if (!disk || !disk->is_open)

@@ -222,16 +222,26 @@ ErrorCode process_create_partition(CommandArgs *args) {
 
         // Определяем тип файловой системы
         uint8_t fs_type = 0x83; // умолчание для MBR (Linux)
-        if (args->has_type) { // сюда попадёт значение из -fs= или -type=
-            char *endptr;
-            unsigned long val = strtoul(args->type_raw, &endptr, 16);
-            if (*endptr != '\0' || val > 0xFF) {
-                printf("ERROR: invalid filesystem type '%s'. Must be a hex byte (00-FF).\n", args->type_raw);
-                disk_close(&disk);
-                return ERR_INVALID_VALUE;
-            }
-            fs_type = (uint8_t)val;
-        }
+        if (args->has_type) {
+			// Проверяем, похоже ли на hex (0x... или просто hex-цифры)
+			if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+				char *endptr;
+				unsigned long val = strtoul(args->type_raw, &endptr, 16);
+				if (*endptr != '\0' || val > 0xFF) {
+					printf("ERROR: invalid filesystem type '%s'.\n", args->type_raw);
+					disk_close(&disk);
+					return ERR_INVALID_VALUE;
+				}
+				fs_type = (uint8_t)val;
+			} else {
+				fs_type = mbr_type_from_name(args->type_raw);
+				if (fs_type == 0xFF) {
+					printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+					disk_close(&disk);
+					return ERR_INVALID_VALUE;
+				}
+			}
+		}
 
 		if (size_sectors > UINT32_MAX) {
 			printf("ERROR: size too large for MBR partition (max 2 TiB).\n");
@@ -249,16 +259,19 @@ ErrorCode process_create_partition(CommandArgs *args) {
     } else if (table_type == PT_GPT) {
 		// Для GPT индекс может быть до 128, проверять не здесь (функция сама проверит)
 		uint8_t fs_guid[16];
-		if (args->has_type) {
+		// Проверяем, похоже ли на hex (GUID в виде строки)
+		if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
 			if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
 				printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
 				disk_close(&disk);
 				return ERR_INVALID_VALUE;
 			}
 		} else {
-			// GUID по умолчанию (Linux filesystem)
-			uint8_t default_guid[16] = GPT_TYPE_LINUX_FILESYSTEM;
-			memcpy(fs_guid, default_guid, 16);
+			if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
+				printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+				disk_close(&disk);
+				return ERR_INVALID_VALUE;
+			}
 		}
 
 		// Размер в секторах (уже посчитан ранее, в size_sectors)
@@ -467,14 +480,26 @@ ErrorCode process_set_type(CommandArgs *args) {
 	}
 
     if (table_type == PT_MBR) {
-        char *endptr;
-        unsigned long val = strtoul(args->type_raw, &endptr, 16);
-        if (*endptr != '\0' || val > 0xFF) {
-            printf("Error: Invalid partition type '%s'. Must be a hex byte (00-FF).\n", args->type_raw);
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        err = mbr_set_partition_type(&disk, index, (uint8_t)val);
+		uint8_t fs_type;
+		if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+			char *endptr;
+			unsigned long val = strtoul(args->type_raw, &endptr, 16);
+			if (*endptr != '\0' || val > 0xFF) {
+				printf("ERROR: invalid filesystem type '%s'.\n", args->type_raw);
+				disk_close(&disk);
+				return ERR_INVALID_VALUE;
+			}
+			fs_type = (uint8_t)val;
+		} else {
+			fs_type = mbr_type_from_name(args->type_raw);
+			if (fs_type == 0xFF) {
+				printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+				disk_close(&disk);
+				return ERR_INVALID_VALUE;
+			}
+		}
+
+        err = mbr_set_partition_type(&disk, index, fs_type);
 		if (err == ERR_OK) {
 			printf("Partition %d deleted successfully.\n", index + 1);
 		} else if (err == ERR_INVALID_VALUE) {
@@ -484,11 +509,20 @@ ErrorCode process_set_type(CommandArgs *args) {
 		}
     } else if (table_type == PT_GPT) {
 		uint8_t fs_guid[16];
-		if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
-			printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
-			disk_close(&disk);
-			return ERR_INVALID_VALUE;
+		if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+			if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
+				printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
+				disk_close(&disk);
+				return ERR_INVALID_VALUE;
+			}
+		} else {
+			if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
+				printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+				disk_close(&disk);
+				return ERR_INVALID_VALUE;
+			}
 		}
+
 		err = gpt_set_partition_type(&disk, index, fs_guid);
 		if (err == ERR_OK) {
 			printf("Partition %d type changed successfully.\n", index + 1);

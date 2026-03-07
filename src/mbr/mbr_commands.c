@@ -17,28 +17,37 @@ static void cmd_mbr_initialize(MBR *mbr) {
 }
 
 // Таблица соответствия типов
-// static const struct {
-// 	uint8_t type;
-// 	const char *name;
-// } type_names[] = {
-// 	{0x00, "Empty"},
-// 	{0x01, "FAT12"},
-// 	{0x04, "FAT16 (<32M)"},
-// 	{0x05, "Extended"},
-// 	{0x06, "FAT16B"},
-// 	{0x07, "NTFS/HPFS"},
-// 	{0x0B, "FAT32"},
-// 	{0x0C, "FAT32 LBA"},
-// 	{0x0E, "FAT16 LBA"},
-// 	{0x0F, "Extended LBA"},
-// 	{0x82, "Linux Swap"},
-// 	{0x83, "Linux"},
-// 	{0x8E, "Linux LVM"},
-// 	{0xEE, "GPT Protective"},
-// 	{0xEF, "EFI System"},
-// 	{0, NULL}
-// };
+static const struct {
+	uint8_t type;
+	const char *name;
+} type_names[] = {
+	{0x00, "Empty"},
+	{0x01, "FAT12"},
+	{0x04, "FAT16 (<32M)"},
+	{0x05, "Extended"},
+	{0x06, "FAT16B"},
+	{0x07, "NTFS/HPFS"},
+	{0x0B, "FAT32"},
+	{0x0C, "FAT32 LBA"},
+	{0x0E, "FAT16 LBA"},
+	{0x0F, "Extended LBA"},
+	{0x82, "Linux Swap"},
+	{0x83, "Linux"},
+	{0x8E, "Linux LVM"},
+	{0xEE, "GPT Protective"},
+	{0xEF, "EFI System"},
+	{0, NULL}
+};
 // ***
+
+uint8_t mbr_type_from_name(const char *name) {
+    for (int i = 0; type_names[i].name != NULL; i++) {
+        if (strcasecmp(name, type_names[i].name) == 0)
+            return type_names[i].type;
+    }
+    return 0xFF; // не найдено
+}
+
 
 ErrorCode mbr_create(Disk *disk) {
     if (!disk || !disk->is_open)
