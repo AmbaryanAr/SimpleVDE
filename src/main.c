@@ -47,10 +47,35 @@ int main(int argc, char *argv[]) {
     }
 
     // Отдельная обработка глобальных опций
-    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
-        print_help();
-        return 0;
-    }
+    // Отдельная обработка глобальных опций
+	if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+		if (argc == 2) {
+			// Просто --help или -h без дополнительного аргумента
+			print_general_help();
+			return 0;
+		} else if (argc == 3) {
+			const char *category = argv[2];
+			if (strcmp(category, "disk") == 0) {
+				print_disk_help();
+			} else if (strcmp(category, "partition") == 0) {
+				print_partition_help();
+			} else if (strcmp(category, "fs") == 0) {
+				print_fs_help();
+			} else if (strcmp(category, "map_file") == 0) {
+				print_map_help();
+			} else if (strcmp(category, "global") == 0) {
+				print_global_help();
+			} else {
+				printf("Unknown help category: '%s'\n", category);
+				printf("Available categories: disk, partition, fs, map_file, global\n");
+				return 1;
+			}
+			return 0;
+		} else {
+			printf("Usage: %s --help [category]\n", argv[0]);
+			return 1;
+		}
+	}
     if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
         print_version();
         return 0;
