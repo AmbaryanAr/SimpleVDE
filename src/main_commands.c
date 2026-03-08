@@ -546,15 +546,71 @@ ErrorCode process_set_type(CommandArgs *args) {
 }
 
 ErrorCode process_format(CommandArgs *args) {
-    printf("\n>>> STUB: process_format\n");
-    print_args_summary(args);
+    if (!args->has_disk_path || !args->has_part_index || !args->has_type)
+        return ERR_MISSING_ARGUMENT;
 
-	if (!args->has_disk_path || !args->has_part_index || !args->has_type)
-		return ERR_MISSING_ARGUMENT;
+    // Пока поддерживаем только FAT32
+    if (strcasecmp(args->type_raw, "fat32") != 0) {
+        printf("Error: Unsupported filesystem type '%s'. Currently only FAT32 is supported.\n", args->type_raw);
+        return ERR_INVALID_VALUE;
+    }
 
-    printf("ACTION: Would format partition at index %s on disk '%s' as %s\n", 
-           args->part_index_raw, args->disk_path, args->type_raw);
-    return ERR_OK;
+    Disk disk;
+    PartitionTableType table_type;
+    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
+    if (err != ERR_OK) {
+        if (err == ERR_DISK_OPEN)
+            printf("Error: cannot open disk file '%s'\n", args->disk_path);
+        else
+            printf("Error: failed to open disk (code %d)\n", err);
+        return err;
+    }
+
+    int index = atoi(args->part_index_raw) - 1;
+    if (index < 0) {
+        printf("Error: invalid partition index.\n");
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    uint64_t start_lba, size_sectors;
+
+    if (table_type == PT_MBR) {
+        if (index >= 4) {
+            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
+        err = mbr_get_partition_info(&disk, index, &start_lba, &size_sectors);
+    } else if (table_type == PT_GPT) {
+        err = gpt_get_partition_info(&disk, index, &start_lba, &size_sectors);
+    } else {
+        printf("Error: unknown partition table type.\n");
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    if (err != ERR_OK) {
+        if (err == ERR_INVALID_VALUE)
+            printf("Error: partition %d does not exist.\n", index + 1);
+        else
+            printf("Error: failed to read partition info (code %d).\n", err);
+        disk_close(&disk);
+        return err;
+    }
+
+    // Определяем номер диска (для FAT32 BPB). Пока всегда 0x80 (жёсткий диск)
+    uint8_t drive_number = 0x80;
+
+    err = fat32_format(&disk, start_lba, size_sectors, drive_number);
+    if (err == ERR_OK) {
+        printf("Partition %d formatted as FAT32 successfully.\n", index + 1);
+    } else {
+        printf("Error: failed to format partition (code %d).\n", err);
+    }
+
+    disk_close(&disk);
+    return err;
 }
 
 ErrorCode process_write_mbr_loader(CommandArgs *args) {
