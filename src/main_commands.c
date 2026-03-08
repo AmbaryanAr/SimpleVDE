@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <errno.h>
-
+#include <inttypes.h>
 // *** Вспомогательная функция для вывода аргументов ***
 static void print_args_summary(CommandArgs *args) {
     printf("Arguments received:\n");
@@ -259,21 +259,26 @@ ErrorCode process_create_partition(CommandArgs *args) {
     } else if (table_type == PT_GPT) {
 		// Для GPT индекс может быть до 128, проверять не здесь (функция сама проверит)
 		uint8_t fs_guid[16];
-		// Проверяем, похоже ли на hex (GUID в виде строки)
-		if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
-			if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
-				printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
-				disk_close(&disk);
-				return ERR_INVALID_VALUE;
+		if (args->has_type) {
+			// Проверяем, похоже ли на hex (GUID в виде строки)
+			if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+				if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
+					printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
+					disk_close(&disk);
+					return ERR_INVALID_VALUE;
+				}
+			} else {
+				if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
+					printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+					disk_close(&disk);
+					return ERR_INVALID_VALUE;
+				}
 			}
 		} else {
-			if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
-				printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
-				disk_close(&disk);
-				return ERR_INVALID_VALUE;
-			}
+			// GUID по умолчанию (Linux filesystem)
+			uint8_t default_guid[16] = GPT_TYPE_LINUX_FILESYSTEM;
+			memcpy(fs_guid, default_guid, 16);
 		}
-
 		// Размер в секторах (уже посчитан ранее, в size_sectors)
 		err = gpt_create_partition(&disk, index, size_sectors, fs_guid);
 		if (err == ERR_OK) {

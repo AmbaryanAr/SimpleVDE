@@ -148,6 +148,18 @@ ErrorCode gpt_delete_partition(Disk *disk, int index);
  */
 ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid);
 
+/**
+ * Получает информацию о GPT-разделе по индексу.
+ *
+ * @param disk         Открытый диск.
+ * @param index        Индекс раздела (0..header.num_partition_entries-1).
+ * @param start_lba    Указатель для записи начального LBA (абсолютный на диске).
+ * @param size_sectors Указатель для записи размера в секторах.
+ * @return Код ошибки: ERR_OK – успешно, ERR_INVALID_VALUE – раздел не существует или неверный индекс,
+ *         ERR_DISK_READ – ошибка чтения GPT-структур, ERR_GENERIC – ошибка выделения памяти.
+ */
+ErrorCode gpt_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uint64_t *size_sectors);
+
 // Работа с GUID
 void gpt_guid_to_string(const uint8_t *guid, char *str);
 int gpt_guid_from_string(const char *str, uint8_t *guid);

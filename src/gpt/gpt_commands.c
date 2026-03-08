@@ -225,7 +225,6 @@ ErrorCode gpt_create(Disk *disk) {
 // Создание раздела GPT
 ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, const uint8_t *type_guid) {
     if (!disk || !disk->is_open) return ERR_DISK_OPEN;
-    if (index < 0) return ERR_INVALID_VALUE;
 
     // Читаем заголовок GPT
     uint8_t header_sector[SECTOR_SIZE];
@@ -244,11 +243,10 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
     size_t table_size = num_entries * entry_size;
     uint32_t sectors_per_table = (uint32_t)((table_size + SECTOR_SIZE - 1) / SECTOR_SIZE);
 
-    // Выделяем память под таблицу разделов
     GPTPartitionEntry *partitions = (GPTPartitionEntry*)malloc(table_size);
-    if (!partitions) return ERR_GENERIC;
-
-    // Читаем таблицу разделов из основного расположения
+    if (!partitions)
+        return ERR_GENERIC;
+    
     uint64_t table_lba = header->partition_entry_lba;
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
@@ -263,54 +261,52 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
     // Проверяем, свободна ли целевая запись
     if (!gpt_partition_is_empty(&partitions[index])) {
         free(partitions);
-        return ERR_INVALID_VALUE; // уже занято
+        return ERR_INVALID_VALUE;
     }
 
     // Определяем стартовый LBA
     uint64_t first_usable = header->first_usable_lba;
     uint64_t last_usable = header->last_usable_lba;
     uint64_t start_lba = gpt_find_next_free_lba(partitions, num_entries, first_usable, last_usable);
+  
     if (start_lba > last_usable) {
         free(partitions);
-        return ERR_INVALID_VALUE; // нет свободного места
+        return ERR_INVALID_VALUE;
     }
 
     // Если размер не указан, занимаем всё доступное место
     uint64_t free_sectors = last_usable - start_lba + 1;
     uint64_t size = size_sectors;
-    if (size == 0) {
+    if (size == 0)
         size = free_sectors;
-    }
+
     if (size > free_sectors || size == 0) {
         free(partitions);
-        return ERR_INVALID_VALUE; // недостаточно места или нулевой размер
+        return ERR_INVALID_VALUE;
     }
 
     uint64_t end_lba = start_lba + size - 1;
     if (end_lba > last_usable) {
         free(partitions);
-        return ERR_INVALID_VALUE; // выход за границы
+        return ERR_INVALID_VALUE;
     }
-
-    // Заполняем запись раздела
+    
     GPTPartitionEntry *entry = &partitions[index];
     memcpy(entry->type_guid, type_guid, 16);
     generate_guid(entry->partition_guid);
     entry->first_lba = start_lba;
     entry->last_lba = end_lba;
     entry->attributes = 0;
-    memset(entry->partition_name, 0, sizeof(entry->partition_name)); // имя пока не заполняем
-
-    // Пересчитываем CRC32 таблицы
+    memset(entry->partition_name, 0, sizeof(entry->partition_name));
+    
     uint32_t new_table_crc = crc32(partitions, table_size);
     header->partitions_crc32 = new_table_crc;
-
-    // Пересчитываем CRC32 заголовка
+    
     header->header_crc32 = 0;
     uint32_t new_header_crc = crc32(header, GPT_HEADER_SIZE);
     header->header_crc32 = new_header_crc;
-
-    // Записываем таблицу разделов (основная)
+    
+    // Запись таблицы разделов (основная)
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
         uint8_t *buf = (uint8_t*)partitions + i * SECTOR_SIZE;
@@ -322,7 +318,7 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
             return err;
         }
     }
-
+    
     // Резервная таблица
     uint64_t backup_table_lba = header->backup_lba - sectors_per_table;
     for (uint32_t i = 0; i < sectors_per_table; i++) {
@@ -336,21 +332,21 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
             return err;
         }
     }
-
+    
     // Заголовок основной
     err = disk_write(disk, header, sizeof(GPTHeader), 1 * SECTOR_SIZE);
     if (err != ERR_OK) {
         free(partitions);
         return err;
     }
-
+    
     // Заголовок резервный
     err = disk_write(disk, header, sizeof(GPTHeader), header->backup_lba * SECTOR_SIZE);
     if (err != ERR_OK) {
         free(partitions);
         return err;
     }
-
+    
     free(partitions);
     return ERR_OK;
 }
@@ -443,6 +439,52 @@ ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid
         free(partitions);
         return err;
     }
+
+    free(partitions);
+    return ERR_OK;
+}
+
+ErrorCode gpt_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uint64_t *size_sectors) {
+    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
+    if (!start_lba || !size_sectors) return ERR_NULL_POINTER;
+
+    uint8_t header_sector[SECTOR_SIZE];
+    ErrorCode err = disk_read(disk, header_sector, SECTOR_SIZE, 1 * SECTOR_SIZE);
+    if (err != ERR_OK) return err;
+
+    GPTHeader *header = (GPTHeader*)header_sector;
+    if (memcmp(header->signature, GPT_SIGNATURE, 8) != 0) return ERR_INVALID_VALUE;
+
+    if (index < 0 || (uint32_t)index >= header->num_partition_entries) return ERR_INVALID_VALUE;
+
+    uint32_t entry_size = header->partition_entry_size;
+    if (entry_size != sizeof(GPTPartitionEntry)) return ERR_INVALID_VALUE;
+
+    uint32_t num_entries = header->num_partition_entries;
+    size_t table_size = num_entries * entry_size;
+    uint32_t sectors_per_table = (uint32_t)((table_size + SECTOR_SIZE - 1) / SECTOR_SIZE);
+
+    GPTPartitionEntry *partitions = (GPTPartitionEntry*)malloc(table_size);
+    if (!partitions) return ERR_GENERIC;
+
+    uint64_t table_lba = header->partition_entry_lba;
+    for (uint32_t i = 0; i < sectors_per_table; i++) {
+        uint64_t offset = (table_lba + i) * SECTOR_SIZE;
+        uint8_t *buf = (uint8_t*)partitions + i * SECTOR_SIZE;
+        err = disk_read(disk, buf, SECTOR_SIZE, offset);
+        if (err != ERR_OK) {
+            free(partitions);
+            return err;
+        }
+    }
+
+    if (gpt_partition_is_empty(&partitions[index])) {
+        free(partitions);
+        return ERR_INVALID_VALUE;
+    }
+
+    *start_lba = partitions[index].first_lba;
+    *size_sectors = partitions[index].last_lba - partitions[index].first_lba + 1;
 
     free(partitions);
     return ERR_OK;

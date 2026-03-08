@@ -134,6 +134,18 @@ ErrorCode mbr_set_active(Disk *disk, int index);
 ErrorCode mbr_set_partition_type(Disk *disk, int index, uint8_t type);
 
 /**
+ * Получает информацию о MBR-разделе по индексу.
+ *
+ * @param disk         Открытый диск.
+ * @param index        Индекс раздела (0-3).
+ * @param start_lba    Указатель для записи начального LBA (абсолютный на диске).
+ * @param size_sectors Указатель для записи размера в секторах.
+ * @return Код ошибки: ERR_OK – успешно, ERR_INVALID_VALUE – раздел не существует или неверный индекс,
+ *         ERR_DISK_READ – ошибка чтения MBR.
+ */
+ErrorCode mbr_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uint64_t *size_sectors);
+
+/**
  * Записывает загрузочный код в область bootstrap MBR (первые 446 байт).
  * Существующая таблица разделов и сигнатура не изменяются.
  *

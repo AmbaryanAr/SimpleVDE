@@ -194,6 +194,24 @@ ErrorCode mbr_set_partition_type(Disk *disk, int index, uint8_t type) {
     return disk_write(disk, sector, SECTOR_SIZE, 0);
 }
 
+ErrorCode mbr_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uint64_t *size_sectors) {
+    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
+    if (index < 0 || index >= 4) return ERR_INVALID_VALUE;
+    if (!start_lba || !size_sectors) return ERR_NULL_POINTER;
+
+    uint8_t sector[SECTOR_SIZE];
+    ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, 0);
+    if (err != ERR_OK) return err;
+
+    uint8_t type = sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4];
+    if (type == 0)
+        return ERR_INVALID_VALUE;
+
+    *start_lba = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 8);
+    *size_sectors = *(uint32_t*)(sector + PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 12);
+    return ERR_OK;
+}
+
 ErrorCode mbr_write_code(Disk *disk, const uint8_t *code, size_t code_size) {
     if (!disk || !disk->is_open)
         return ERR_DISK_OPEN;
