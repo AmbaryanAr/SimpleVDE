@@ -86,6 +86,74 @@ static bool parse_integer(const char *str, uint64_t *out) {
     *out = val;
     return true;
 }
+
+/**
+ * Открывает диск, проверяет индекс раздела и получает информацию о нём.
+ *
+ * Функция выполняет следующие действия:
+ * 1. Открывает диск через cmd_disk_open_and_detect.
+ * 2. Проверяет, что индекс раздела (пользовательский счёт с 1) корректен.
+ * 3. В зависимости от типа таблицы (MBR или GPT) вызывает соответствующую
+ *    функцию для получения начального LBA и, опционально, размера раздела.
+ * 4. При возникновении ошибки выводит понятное сообщение и закрывает диск.
+ *
+ * @param args         Указатель на распарсенные аргументы (должны содержать disk_path и part_index_raw).
+ * @param disk         Указатель на структуру Disk, которая будет заполнена при успехе.
+ * @param table_type   Указатель на переменную для сохранения типа таблицы разделов.
+ * @param start_lba    Указатель для сохранения начального LBA раздела.
+ * @param size_sectors Указатель для сохранения размера раздела в секторах (может быть NULL, если не нужен).
+ * @return Код ошибки или ERR_OK. При успехе диск остаётся открытым; вызывающий должен сам закрыть его.
+ */
+static ErrorCode open_and_get_partition(CommandArgs *args, Disk *disk, PartitionTableType *table_type, uint64_t *start_lba, uint64_t *size_sectors) {
+    // Открываем диск и определяем тип таблицы
+    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, disk, table_type);
+    if (err != ERR_OK) {
+        if (err == ERR_DISK_OPEN)
+            printf("Error: cannot open disk file '%s'\n", args->disk_path);
+        else
+            printf("Error: failed to open disk (code %d)\n", err);
+        return err;
+    }
+
+    // Парсим индекс (пользовательский счёт с 1)
+    int index = atoi(args->part_index_raw) - 1;
+    if (index < 0) {
+        printf("Error: invalid partition index.\n");
+        disk_close(disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    // Получаем информацию о разделе в зависимости от типа таблицы
+    if (*table_type == PT_MBR) {
+        if (index >= 4) {
+            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
+            disk_close(disk);
+            return ERR_INVALID_VALUE;
+        }
+        uint64_t tmp_size;
+        err = mbr_get_partition_info(disk, index, start_lba, &tmp_size);
+        if (size_sectors) *size_sectors = tmp_size;
+    } else if (*table_type == PT_GPT) {
+        uint64_t tmp_size;
+        err = gpt_get_partition_info(disk, index, start_lba, &tmp_size);
+        if (size_sectors) *size_sectors = tmp_size;
+    } else {
+        printf("Error: unknown partition table type.\n");
+        disk_close(disk);
+        return ERR_INVALID_VALUE;
+    }
+
+    if (err != ERR_OK) {
+        if (err == ERR_INVALID_VALUE)
+            printf("Error: partition %d does not exist.\n", index + 1);
+        else
+            printf("Error: failed to read partition info (code %d).\n", err);
+        disk_close(disk);
+        return err;
+    }
+
+    return ERR_OK;
+}
 // ***
 
 // ---------- Функции для дисковых операций ----------
@@ -312,28 +380,14 @@ ErrorCode process_delete_partition(CommandArgs *args) {
 
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
+    uint64_t start_lba; // не используется, но нужно для вызова
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
         return err;
-    }
 
     int index = atoi(args->part_index_raw) - 1;
-    if (index < 0) {
-        printf("Error: invalid partition index.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
 
     if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
         err = mbr_delete_partition(&disk, index);
         if (err == ERR_OK) {
             printf("Partition %d deleted successfully.\n", index + 1);
@@ -361,20 +415,19 @@ ErrorCode process_delete_partition(CommandArgs *args) {
 }
 
 ErrorCode process_set_active(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_op) {
-		printf("Error: missing -op= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_op) {
+        printf("Error: missing -op= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
-    // Определяем, активный или неактивный режим
     bool set_active;
     if (strcmp(args->op_raw, "active") == 0) {
         set_active = true;
@@ -385,39 +438,26 @@ ErrorCode process_set_active(CommandArgs *args) {
         return ERR_INVALID_VALUE;
     }
 
-    // Открываем диск и определяем тип таблицы разделов
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-	if (err != ERR_OK) {
-		if (err == ERR_DISK_OPEN)
-			printf("Error: cannot open disk file '%s'\n", args->disk_path);
-		else
-			printf("Error: failed to open disk (code %d)\n", err);
-		return err;
-	}
+    uint64_t start_lba;
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
+        return err;
 
-    // Парсим индекс раздела (пользователь вводит 1-4)
     int index = atoi(args->part_index_raw) - 1;
-    if (index < 0 || index >= 4) {
-        printf("ERROR: partition index must be between 1 and 4\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
 
-    // Действия в зависимости от типа таблицы
     if (table_type == PT_MBR) {
         if (set_active) {
-			err = mbr_set_active(&disk, index);
-			if (err == ERR_OK) {
-				printf("Partition %d activated successfully.\n", index + 1);
-			} else if (err == ERR_INVALID_VALUE) {
-				printf("Error: partition %d does not exist.\n", index + 1);
-			} else {
-				printf("Error: failed to activate partition (code %d).\n", err);
-			}
-		} else {
-            // Для неактивного просто сбрасываем флаг у указанного раздела
+            err = mbr_set_active(&disk, index);
+            if (err == ERR_OK) {
+                printf("Partition %d activated successfully.\n", index + 1);
+            } else if (err == ERR_INVALID_VALUE) {
+                printf("Error: partition %d does not exist.\n", index + 1);
+            } else {
+                printf("Error: failed to activate partition (code %d).\n", err);
+            }
+        } else {
             uint8_t sector[SECTOR_SIZE];
             err = disk_read(&disk, sector, SECTOR_SIZE, 0);
             if (err != ERR_OK) {
@@ -425,7 +465,6 @@ ErrorCode process_set_active(CommandArgs *args) {
                 disk_close(&disk);
                 return err;
             }
-            // Проверим, существует ли раздел (тип не 0)
             uint8_t part_type = sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4];
             if (part_type == 0) {
                 printf("Warning: partition %d does not exist (type=0). Nothing to deactivate.\n", index + 1);
@@ -551,18 +590,19 @@ ErrorCode process_set_type(CommandArgs *args) {
 }
 
 ErrorCode process_format(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_type) {
-		printf("Error: missing -fs= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    // Проверяем обязательные аргументы
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_type) {
+        printf("Error: missing -fs= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
     // Пока поддерживаем только FAT32
     if (strcasecmp(args->type_raw, "fat32") != 0) {
@@ -572,54 +612,17 @@ ErrorCode process_format(CommandArgs *args) {
 
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
-        return err;
-    }
-
-    int index = atoi(args->part_index_raw) - 1;
-    if (index < 0) {
-        printf("Error: invalid partition index.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
     uint64_t start_lba, size_sectors;
-
-    if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        err = mbr_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else if (table_type == PT_GPT) {
-        err = gpt_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else {
-        printf("Error: unknown partition table type.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
-    if (err != ERR_OK) {
-        if (err == ERR_INVALID_VALUE)
-            printf("Error: partition %d does not exist.\n", index + 1);
-        else
-            printf("Error: failed to read partition info (code %d).\n", err);
-        disk_close(&disk);
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, &size_sectors);
+    if (err != ERR_OK)
         return err;
-    }
 
     // Определяем номер диска (для FAT32 BPB). Пока всегда 0x80 (жёсткий диск)
     uint8_t drive_number = 0x80;
 
     err = fat32_format(&disk, start_lba, size_sectors, drive_number);
     if (err == ERR_OK) {
-        printf("Partition %d formatted as FAT32 successfully.\n", index + 1);
+        printf("Partition %d formatted as FAT32 successfully.\n", atoi(args->part_index_raw));
     } else {
         printf("Error: failed to format partition (code %d).\n", err);
     }
@@ -708,334 +711,133 @@ ErrorCode process_write_bpb_loader(CommandArgs *args) {
 
 // ---------- Функции для файловых операций ----------
 ErrorCode process_ls(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
     const char *path = args->has_path_raw ? args->path_raw : "/";
 
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
-        return err;
-    }
-
-    int index = atoi(args->part_index_raw) - 1;
-    if (index < 0) {
-        printf("Error: invalid partition index.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
     uint64_t start_lba;
-    if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        uint64_t size_sectors; // не нужен
-        err = mbr_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else if (table_type == PT_GPT) {
-        uint64_t size_sectors;
-        err = gpt_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else {
-        printf("Error: unknown partition table type.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
-    if (err != ERR_OK) {
-        if (err == ERR_INVALID_VALUE)
-            printf("Error: partition %d does not exist.\n", index + 1);
-        else
-            printf("Error: failed to read partition info (code %d).\n", err);
-        disk_close(&disk);
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
         return err;
-    }
 
-    // Пока предполагаем, что раздел отформатирован в FAT32.
-    // В будущем можно добавить определение ФС по partition type.
     err = fat32_list_dir(&disk, start_lba, path);
-
     disk_close(&disk);
     return err;
 }
 
 ErrorCode process_copy(CommandArgs *args) {
-	if (!args->has_src) {
-		printf("Error: missing -src= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_path_raw) {
-		printf("Error: missing -path= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    if (!args->has_src) {
+        printf("Error: missing -src= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_path_raw) {
+        printf("Error: missing -path= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
-        return err;
-    }
-
-    int index = atoi(args->part_index_raw) - 1;
-    if (index < 0) {
-        printf("Error: invalid partition index.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
     uint64_t start_lba;
-    if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        uint64_t size_sectors;
-        err = mbr_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else if (table_type == PT_GPT) {
-        uint64_t size_sectors;
-        err = gpt_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else {
-        printf("Error: unknown partition table type.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
-    if (err != ERR_OK) {
-        if (err == ERR_INVALID_VALUE)
-            printf("Error: partition %d does not exist.\n", index + 1);
-        else
-            printf("Error: failed to read partition info (code %d).\n", err);
-        disk_close(&disk);
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
         return err;
-    }
 
-    // Пока предполагаем FAT32
     err = fat32_copy_file(&disk, start_lba, args->src_raw, args->path_raw);
-
     disk_close(&disk);
     return err;
 }
 
 ErrorCode process_rm(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_path_raw) {
-		printf("Error: missing -path= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_path_raw) {
+        printf("Error: missing -path= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
-        return err;
-    }
-
-    int index = atoi(args->part_index_raw) - 1;
-    if (index < 0) {
-        printf("Error: invalid partition index.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
     uint64_t start_lba;
-    if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        uint64_t size_sectors;
-        err = mbr_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else if (table_type == PT_GPT) {
-        uint64_t size_sectors;
-        err = gpt_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else {
-        printf("Error: unknown partition table type.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
-    if (err != ERR_OK) {
-        if (err == ERR_INVALID_VALUE)
-            printf("Error: partition %d does not exist.\n", index + 1);
-        else
-            printf("Error: failed to read partition info (code %d).\n", err);
-        disk_close(&disk);
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
         return err;
-    }
 
-    // Пока предполагаем FAT32
     err = fat32_delete_file(&disk, start_lba, args->path_raw);
-
     disk_close(&disk);
     return err;
 }
 
 ErrorCode process_mkdir(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_path_raw) {
-		printf("Error: missing -path= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_path_raw) {
+        printf("Error: missing -path= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
-        return err;
-    }
-
-    int index = atoi(args->part_index_raw) - 1;
-    if (index < 0) {
-        printf("Error: invalid partition index.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
     uint64_t start_lba;
-    if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        uint64_t size_sectors;
-        err = mbr_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else if (table_type == PT_GPT) {
-        uint64_t size_sectors;
-        err = gpt_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else {
-        printf("Error: unknown partition table type.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
-    if (err != ERR_OK) {
-        if (err == ERR_INVALID_VALUE)
-            printf("Error: partition %d does not exist.\n", index + 1);
-        else
-            printf("Error: failed to read partition info (code %d).\n", err);
-        disk_close(&disk);
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
         return err;
-    }
 
-    // Пока предполагаем FAT32
     err = fat32_create_dir(&disk, start_lba, args->path_raw);
-
     disk_close(&disk);
     return err;
 }
 
 ErrorCode process_rmdir(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_path_raw) {
-		printf("Error: missing -path= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    if (!args->has_disk_path) {
+        printf("Error: missing -disk= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_part_index) {
+        printf("Error: missing -index= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
+    if (!args->has_path_raw) {
+        printf("Error: missing -path= parameter.\n");
+        return ERR_MISSING_ARGUMENT;
+    }
 
     Disk disk;
     PartitionTableType table_type;
-    ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-    if (err != ERR_OK) {
-        if (err == ERR_DISK_OPEN)
-            printf("Error: cannot open disk file '%s'\n", args->disk_path);
-        else
-            printf("Error: failed to open disk (code %d)\n", err);
-        return err;
-    }
-
-    int index = atoi(args->part_index_raw) - 1;
-    if (index < 0) {
-        printf("Error: invalid partition index.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
     uint64_t start_lba;
-    if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-            disk_close(&disk);
-            return ERR_INVALID_VALUE;
-        }
-        uint64_t size_sectors;
-        err = mbr_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else if (table_type == PT_GPT) {
-        uint64_t size_sectors;
-        err = gpt_get_partition_info(&disk, index, &start_lba, &size_sectors);
-    } else {
-        printf("Error: unknown partition table type.\n");
-        disk_close(&disk);
-        return ERR_INVALID_VALUE;
-    }
-
-    if (err != ERR_OK) {
-        if (err == ERR_INVALID_VALUE)
-            printf("Error: partition %d does not exist.\n", index + 1);
-        else
-            printf("Error: failed to read partition info (code %d).\n", err);
-        disk_close(&disk);
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
         return err;
-    }
 
-    // Пока предполагаем FAT32
     err = fat32_remove_dir(&disk, start_lba, args->path_raw);
-
     disk_close(&disk);
     return err;
 }
