@@ -1,58 +1,47 @@
-# Makefile для SimpleVDE (MinGW64)
-# Использование: mingw32-make [all|clean|debug]
-
-SHELL = cmd
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -Iinclude -g -D_POSIX_C_SOURCE=200809L
-LDFLAGS =
-BUILDDIR = build
-TARGET = $(BUILDDIR)/simplevde
+CFLAGS = -std=c11 -Wall -Wextra -Iinclude
+TARGET = simplevde.exe
 SRCDIR = src
 OBJDIR = obj
-INCDIR = include
 
-# Явно перечисляем все исходные файлы
-SOURCES = src/main.c \
-		src/main_commands.c \
-		src/disk/disk.c \
-		src/disk/disk_commands.c \
-		src/mbr/mbr_commands.c \
-		src/gpt/gpt_commands.c \
-		src/shell/shell.c \
-		src/fs/fat32/fat32_commands.c \
-		src/help/help.c
+# Все исходные файлы
+SOURCES = $(SRCDIR)/main.c \
+          $(SRCDIR)/utils.c \
+          $(SRCDIR)/error_codes.c \
+          $(SRCDIR)/partition/partition.c \
+          $(wildcard $(SRCDIR)/cmd/*.c) \
+          $(wildcard $(SRCDIR)/disk/*.c) \
+          $(wildcard $(SRCDIR)/fs/fat32/*.c) \
+          $(wildcard $(SRCDIR)/help/*.c) \
+          $(wildcard $(SRCDIR)/partition/gpt/*.c) \
+          $(wildcard $(SRCDIR)/partition/mbr/*.c) \
+          $(wildcard $(SRCDIR)/shell/*.c)
 
 # Преобразование в объектные файлы
-OBJECTS = $(patsubst $(SRCDIR)/%.c, $(OBJDIR)/%.o, $(SOURCES))
+OBJECTS = $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(SOURCES))
 
-# Список поддиректорий для создания в obj/
-OBJ_SUBDIRS = $(sort $(dir $(OBJECTS)))
-
-.PHONY: all clean debug
+# Команда создания каталога
+ifeq ($(OS),Windows_NT)
+    define MKDIR
+	@if not exist "$(subst /,\,$(dir $@))" mkdir "$(subst /,\,$(dir $@))"
+    endef
+else
+    define MKDIR
+	@mkdir -p $(dir $@)
+    endef
+endif
 
 all: $(TARGET)
 
-# Создание поддиректорий
-$(OBJ_SUBDIRS):
-	if not exist "$@" mkdir "$@"
+$(TARGET): $(OBJECTS)
+	$(CC) $^ -o $@
 
-# Создание папки build
-$(BUILDDIR):
-	if not exist "$@" mkdir "$@"
-
-# Компиляция .c в .o
-$(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJ_SUBDIRS)
+$(OBJDIR)/%.o: $(SRCDIR)/%.c
+	$(MKDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Линковка
-$(TARGET): $(OBJECTS) | $(BUILDDIR)
-	$(CC) $^ -o $@ $(LDFLAGS)
-
 clean:
-	if exist $(OBJDIR) rmdir /s /q $(OBJDIR)
-	if exist $(BUILDDIR) rmdir /s /q $(BUILDDIR)
+	rm -f $(TARGET)
+	rm -rf $(OBJDIR)
 
-debug:
-	@echo SOURCES: $(SOURCES)
-	@echo OBJECTS: $(OBJECTS)
-	@echo OBJ_SUBDIRS: $(OBJ_SUBDIRS)
+.PHONY: all clean

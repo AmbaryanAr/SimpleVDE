@@ -1,239 +1,284 @@
-#include "main_commands.h"
-#include "help.h"
-#include "version.h"
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <time.h>
 
-static bool is_option(const char *arg) {
-    return arg && arg[0] == '-';
-}
+#include "cmd.h"
+#include "help.h"
+#include "utils.h"
+#include "shell.h"
+#include "cmd_fs.h"
+#include "cmd_disk.h"
+#include "cmd_part.h"
+#include "cmd_format.h"
+#include "error_codes.h"
 
-static bool extract_value(const char *arg, const char *prefix, char *value, int max_len) {
-    if (!arg || !prefix || !value) return false;
-    size_t prefix_len = strlen(prefix);
-    if (strncmp(arg, prefix, prefix_len) != 0) return false;
-    const char *val_start = arg + prefix_len;
-    strncpy(value, val_start, max_len - 1);
-    value[max_len - 1] = '\0';
-    return true;
-}
+// Макрос для проверки одного обязательного параметра
+#define CHECK_ARG(field, name) \
+    do { \
+        if (!(field)) { \
+            fprintf(stderr, "Error: missing -%s= parameter.\n", name); \
+            return 1; \
+        } \
+    } while(0)
 
-static void free_args(CommandArgs *args) {
-    if (!args) return;
-    free(args->disk_path);
-    free(args->part_index_raw);
-    free(args->size_raw);
-    free(args->type_raw);
-    free(args->path);
-    free(args->path_raw);
-    free(args->fs_type);
-    free(args->name_raw);
-    free(args->file_raw);
-    free(args->src_raw);
-    free(args->op_raw);
-    free(args->offset_raw);
-    memset(args, 0, sizeof(CommandArgs));
+static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
+    srand((unsigned)time(NULL));
+	memset(args, 0, sizeof(CMDArgs));
+
+    for (int i = 1; i < argc; ++i) {
+        char *arg = argv[i];
+
+        if (arg[0] != '-') {
+            fprintf(stderr, "Warning: unexpected argument '%s' ignored.\n", arg);
+            continue;
+        }
+
+        char *eq = strchr(arg, '=');
+        if (eq) {
+            *eq = '\0';
+            char *key = arg;
+            while (*key == '-') key++;
+            char *value = eq + 1;
+
+            if (strcmp(key, "file") == 0)
+                args->file = value;
+            else if (strcmp(key, "name") == 0)
+                args->name = value;
+            else if (strcmp(key, "part") == 0)
+                args->part = value;
+            else if (strcmp(key, "size") == 0)
+                args->size = value;
+            else if (strcmp(key, "type") == 0)
+                args->type = value;
+            else if (strcmp(key, "table") == 0)
+                args->table = value;
+            else if (strcmp(key, "offset") == 0)
+                args->offset = value;
+            else if (strcmp(key, "count") == 0)
+                args->count = value;
+            else if (strcmp(key, "src") == 0)
+                args->src = value;
+            else if (strcmp(key, "dest") == 0)
+                args->dest = value;
+            else if (strcmp(key, "path") == 0)
+                args->path = value;
+            else if (strcmp(key, "fs") == 0)
+                args->fs = value;
+            else
+                fprintf(stderr, "Warning: unknown parameter -%s ignored.\n", key);
+
+            *eq = '=';
+        } else {
+            // Команда вида --category или --category-command
+            if (arg[0] != '-' || arg[1] != '-') {
+                fprintf(stderr, "Warning: unexpected argument '%s' ignored.\n", arg);
+                continue;
+            }
+
+            char *dash = strchr(arg + 2, '-');
+            if (dash) {
+                // --category-command
+                *dash = '\0';
+                args->category = arg;
+                args->command = dash + 1;
+            } else {
+                // --category (без команды)
+                args->category = arg;
+                args->command = NULL;
+            }
+        }
+    }
+
+    if (!args->category) {
+        fprintf(stderr, "Error: no command specified.\n");
+        fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
+        exit(1);
+    }
 }
 
 int main(int argc, char *argv[]) {
-    // Инициализация генератора случайных чисел (для GPT GUID)
-    srand(time(NULL));
-
-    if (argc == 1) {
+    if (argc < 2) {
         print_short_help();
         return 0;
     }
 
-    if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        if (argc == 2) {
-            print_general_help();
-            return 0;
-        } else if (argc == 3) {
-            const char *category = argv[2];
-            if (strcmp(category, "disk") == 0) {
-                print_disk_help();
-            } else if (strcmp(category, "partition") == 0) {
-                print_partition_help();
-            } else if (strcmp(category, "fs") == 0) {
-                print_fs_help();
-            } else if (strcmp(category, "map_file") == 0) {
-                print_map_help();
-            } else if (strcmp(category, "global") == 0) {
-                print_global_help();
-            } else {
-                printf("Unknown help category: '%s'\n", category);
-                printf("Available categories: disk, partition, fs, map_file, global\n");
-                return 1;
-            }
-            return 0;
-        } else {
-            printf("Usage: %s --help [category]\n", argv[0]);
-            return 1;
-        }
+    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
+        print_general_help();
+        return 0;
     }
     if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
         print_version();
         return 0;
     }
 
-    const char *category = argv[1];
-    if (strcmp(category, "--disk") != 0 &&
-        strcmp(category, "--partition") != 0 &&
-        strcmp(category, "--copy") != 0 &&
-        strcmp(category, "--ls") != 0 &&
-        strcmp(category, "--mkdir") != 0 &&
-        strcmp(category, "--rmdir") != 0 &&
-        strcmp(category, "--rm") != 0 &&
-        strcmp(category, "--map_file") != 0 &&
-        strcmp(category, "--open") != 0) {
-        printf("Unknown command category: %s\n", category);
-        printf("Try '%s --help' for more information.\n", PROGRAM_EXECUTABLE_NAME);
+    CMDArgs args;
+    parse_arguments(argc, argv, &args);
+    ErrorCode err = ERR_UNKNOWN;
+
+    // Определяем категорию по префиксу (без "--")
+    const char *cat = args.category + 2; // пропускаем "--"
+
+    if (strcmp(cat, "disk") == 0) {
+        if (strcmp(args.command, "create") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.table, "table");
+            CHECK_ARG(args.size, "size");
+            err = cmd_disk_create(&args);
+        } else if (strcmp(args.command, "info") == 0) {
+            CHECK_ARG(args.file, "file");
+            err = cmd_disk_info(&args);
+        } else if (strcmp(args.command, "read") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.offset, "offset");
+            CHECK_ARG(args.count, "count");
+            err = cmd_disk_read(&args);
+        } else if (strcmp(args.command, "read-s") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.offset, "offset");
+            CHECK_ARG(args.count, "count");
+            err = cmd_disk_read_s(&args);
+        } else {
+            fprintf(stderr, "Error: unknown disk command '%s'.\n", args.command);
+            return 1;
+        }
+    }
+    else if (strcmp(cat, "part") == 0) {
+        if (strcmp(args.command, "create") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_part_create(&args);
+        } else if (strcmp(args.command, "delete") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_part_delete(&args);
+        } else if (strcmp(args.command, "set-type") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.type, "type");
+            err = cmd_part_set_type(&args);
+        } else if (strcmp(args.command, "set-active") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_part_set_active(&args);
+        } else if (strcmp(args.command, "set-inactive") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_part_set_inactive(&args);
+        } else {
+            fprintf(stderr, "Error: unknown partition command '%s'.\n", args.command);
+            return 1;
+        }
+    }
+    else if (strcmp(cat, "format") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        CHECK_ARG(args.fs, "fs");
+        err = cmd_format(&args);
+    }
+else if (strcmp(cat, "fs") == 0) {
+    if (strcmp(args.command, "ls") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        // path опционален
+        err = cmd_fs_ls(&args);
+    } else if (strcmp(args.command, "copy") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        CHECK_ARG(args.src, "src");
+        CHECK_ARG(args.dest, "dest");
+        err = cmd_fs_copy(&args);
+    } else if (strcmp(args.command, "mkdir") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        CHECK_ARG(args.path, "path");
+        err = cmd_fs_mkdir(&args);
+    } else if (strcmp(args.command, "rm") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        CHECK_ARG(args.path, "path");
+        err = cmd_fs_rm(&args);
+    } else if (strcmp(args.command, "rmdir") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        CHECK_ARG(args.path, "path");
+        err = cmd_fs_rmdir(&args);
+    } else if (strcmp(args.command, "tree") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        // path опционален
+        err = cmd_fs_tree(&args);
+    } else if (strcmp(args.command, "reserve-init") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        err = cmd_fs_reserve_init(&args);
+    } else if (strcmp(args.command, "reserve-ls") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        err = cmd_fs_reserve_ls(&args);
+    } else if (strcmp(args.command, "reserve-add") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        CHECK_ARG(args.path, "path");
+        err = cmd_fs_reserve_add(&args);
+    } else if (strcmp(args.command, "reserve-rm") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        CHECK_ARG(args.name, "name");
+        err = cmd_fs_reserve_rm(&args);
+    } else if (strcmp(args.command, "reserve-clear") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        err = cmd_fs_reserve_clear(&args);
+    } else if (strcmp(args.command, "reserve-dump") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        err = cmd_fs_reserve_dump(&args);
+    } else if (strcmp(args.command, "reserve-info") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        err = cmd_fs_reserve_info(&args);
+    } else {
+        fprintf(stderr, "Error: unknown fs command '%s'.\n", args.command);
+        return 1;
+    }
+}    
+    else if (strcmp(cat, "shell") == 0) {
+        CHECK_ARG(args.file, "file");
+        CHECK_ARG(args.part, "part");
+        err = cmd_shell(&args);
+        return 1;
+    }
+    else if (strcmp(cat, "mbr") == 0) {
+        if (strcmp(args.command, "write") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.src, "src");
+            err = cmd_mbr_write(&args);
+        } else {
+            fprintf(stderr, "Error: unknown mbr command '%s'.\n", args.command);
+            return 1;
+        }
+    } else if (strcmp(cat, "bpb") == 0) {
+        if (strcmp(args.command, "write") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.src, "src");
+            err = cmd_bpb_write(&args);
+        } else {
+            fprintf(stderr, "Error: unknown bpb command '%s'.\n", args.command);
+            return 1;
+        }
+    }
+    else {
+        fprintf(stderr, "Error: unknown command category '%s'.\n", args.category);
+        fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
         return 1;
     }
 
-    CommandArgs args = {0};
-    args.command = category;
-    int ret = 0;
-
-    for (int i = 2; i < argc; i++) {
-        char value[MAX_ARG];
-
-        if (extract_value(argv[i], "-disk=", value, sizeof(value))) {
-            args.disk_path = strdup(value);
-            args.has_disk_path = true;
-        }
-        else if (extract_value(argv[i], "-index=", value, sizeof(value))) {
-            args.part_index_raw = strdup(value);
-            args.has_part_index = true;
-        }
-        else if (extract_value(argv[i], "-size=", value, sizeof(value))) {
-            args.size_raw = strdup(value);
-            args.has_size = true;
-        }
-        else if (extract_value(argv[i], "-type=", value, sizeof(value))) {
-            args.type_raw = strdup(value);
-            args.has_type = true;
-        }
-        else if (extract_value(argv[i], "-fs=", value, sizeof(value))) {
-            args.type_raw = strdup(value);
-            args.has_type = true;
-        }
-        else if (extract_value(argv[i], "-file=", value, sizeof(value))) {
-            args.file_raw = strdup(value);
-            args.has_file = true;
-        }
-        else if (extract_value(argv[i], "-name=", value, sizeof(value))) {
-            args.name_raw = strdup(value);
-            args.has_name = true;
-        }
-        else if (extract_value(argv[i], "-src=", value, sizeof(value))) {
-            args.src_raw = strdup(value);
-            args.has_src = true;
-        }
-        else if (extract_value(argv[i], "-op=", value, sizeof(value))) {
-            args.op_raw = strdup(value);
-            args.has_op = true;
-        }
-        else if (extract_value(argv[i], "-offset=", value, sizeof(value))) {
-            args.offset_raw = strdup(value);
-            args.has_offset = true;
-        }
-        else if (extract_value(argv[i], "-path=", value, sizeof(value))) {
-            if (strcmp(category, "--disk") == 0) {
-                args.path = strdup(value);
-                args.has_path = true;
-            } else {
-                args.path_raw = strdup(value);
-                args.has_path_raw = true;
-            }
-        }
-        else if (is_option(argv[i])) {
-            printf("Warning: Unknown option '%s' ignored\n", argv[i]);
-        }
+    if (err != ERR_OK) {
+        fprintf(stderr, "Command failed with error code: %d\n", err);
+        return 1;
     }
-
-    if (strcmp(category, "--disk") == 0) {
-        if (!args.has_op) {
-            printf("Error: --disk requires -op parameter.\n");
-            ret = 1;
-            goto cleanup;
-        }
-        if (strcmp(args.op_raw, "create") == 0) {
-            ret = process_create_disk(&args);
-        } else if (strcmp(args.op_raw, "info") == 0) {
-            ret = process_disk_info(&args);
-        } else if (strcmp(args.op_raw, "read") == 0) {
-            ret = process_disk_read(&args);
-        } else {
-            printf("Error: Unknown operation '%s' for --disk\n", args.op_raw);
-            ret = 1;
-        }
-    }
-    else if (strcmp(category, "--partition") == 0) {
-        if (!args.has_op) {
-            printf("Error: --partition requires -op parameter.\n");
-            ret = 1;
-            goto cleanup;
-        }
-        if (strcmp(args.op_raw, "create") == 0) {
-            ret = process_create_partition(&args);
-        } else if (strcmp(args.op_raw, "delete") == 0) {
-            ret = process_delete_partition(&args);
-        } else if (strcmp(args.op_raw, "active") == 0 || strcmp(args.op_raw, "inactive") == 0) {
-            ret = process_set_active(&args);
-        } else if (strcmp(args.op_raw, "set_type") == 0) {
-            ret = process_set_type(&args);
-        } else if (strcmp(args.op_raw, "format") == 0) {
-            ret = process_format(&args);
-        } else if (strcmp(args.op_raw, "write_mbr") == 0) {
-            ret = process_write_mbr_loader(&args);
-        } else if (strcmp(args.op_raw, "write_bpb") == 0) {
-            ret = process_write_bpb_loader(&args);
-        } else {
-            printf("Error: Unknown operation '%s' for --partition\n", args.op_raw);
-            ret = 1;
-        }
-    }
-    else if (strcmp(category, "--open") == 0) {
-        ret = process_open(&args);
-    }
-    else if (strcmp(category, "--copy") == 0) {
-        ret = process_copy(&args);
-    }
-    else if (strcmp(category, "--ls") == 0) {
-        ret = process_ls(&args);
-    }
-    else if (strcmp(category, "--mkdir") == 0) {
-        ret = process_mkdir(&args);
-    }
-    else if (strcmp(category, "--rmdir") == 0) {
-        ret = process_rmdir(&args);
-    }
-    else if (strcmp(category, "--rm") == 0) {
-        ret = process_rm(&args);
-    }
-    else if (strcmp(category, "--map_file") == 0) {
-        if (!args.has_op) {
-            printf("Error: --map_file requires -op parameter.\n");
-            ret = 1;
-            goto cleanup;
-        }
-        if (strcmp(args.op_raw, "list") == 0) {
-            ret = process_map_file(&args);
-        } else if (strcmp(args.op_raw, "delete") == 0) {
-            ret = process_map_file(&args);
-        } else if (strcmp(args.op_raw, "copy") == 0) {
-            ret = process_copy_special(&args);
-        } else {
-            printf("Error: Unknown operation '%s' for --map_file\n", args.op_raw);
-            ret = 1;
-        }
-    }
-
-cleanup:
-    free_args(&args);
-    return ret;
+    return 0;
 }

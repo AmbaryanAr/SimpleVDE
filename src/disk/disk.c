@@ -1,32 +1,29 @@
 #include "disk.h"
 #include <string.h>
 #include <stdlib.h>
-#include <inttypes.h> 
+#include <inttypes.h>
+#include <stdio.h>
 
-// *** Вспомогательные функции ***
-// Смещение указателя 
-static bool _seek(FILE *file, uint64_t offset) {
+static bool disk_seek(FILE *file, uint64_t offset) {
     return fseek64(file, offset, SEEK_SET) == 0;
 }
 
-static size_t _read(FILE *file, void *value, uint32_t size_value, uint64_t offset) {
-    if (!_seek(file, offset)) return 0;
-    return fread(value, 1, size_value, file);
+static size_t disk_read_at(FILE *file, void *buffer, uint64_t size, uint64_t offset) {
+    if (!disk_seek(file, offset)) return 0;
+    return fread(buffer, 1, size, file);
 }
 
-static size_t _write(FILE *file, const void *value, uint32_t size_value, uint64_t offset) {
-    if (!_seek(file, offset)) return 0;
-    return fwrite(value, 1, size_value, file);
+static size_t disk_write_at(FILE *file, const void *data, uint64_t size, uint64_t offset) {
+    if (!disk_seek(file, offset)) return 0;
+    return fwrite(data, 1, size, file);
 }
-// ***
 
-// Открыть диск
 ErrorCode disk_open(const char *path, Disk *disk) {
-    if (!path || !disk)
-		return ERR_DISK_OPEN;
+    if (!path || !disk) return ERR_DISK_OPEN;
+
     FILE *f = fopen(path, "rb+");
-    if (!f)
-		return ERR_DISK_OPEN;
+    if (!f) return ERR_DISK_OPEN;
+setvbuf(f, NULL, _IONBF, 0);
 
     // Определяем размер файла
     if (fseek64(f, 0, SEEK_END) != 0) {
@@ -38,7 +35,7 @@ ErrorCode disk_open(const char *path, Disk *disk) {
         fclose(f);
         return ERR_DISK_SEEK;
     }
-    rewind(f); // или fseek64(f, 0, SEEK_SET)
+    rewind(f);
 
     strncpy(disk->path, path, MAX_PATH - 1);
     disk->path[MAX_PATH - 1] = '\0';
@@ -48,7 +45,6 @@ ErrorCode disk_open(const char *path, Disk *disk) {
     return ERR_OK;
 }
 
-// Закрыть диск
 void disk_close(Disk *disk) {
     if (disk && disk->is_open && disk->file) {
         fclose(disk->file);
@@ -57,47 +53,37 @@ void disk_close(Disk *disk) {
     }
 }
 
-// Создать новый диск
-ErrorCode disk_create(const char *path, uint64_t size_mb, Disk *disk) {
-    if (!path || !disk)
-        return ERR_DISK_CREATE;
+ErrorCode disk_create(const char *path, uint64_t size_bytes, Disk *disk) {
+    if (!path || !disk) return ERR_DISK_CREATE;
 
-    // Проверка переполнения при size_mb * 1024 * 1024
-    if (size_mb > UINT64_MAX / (1024ULL * 1024ULL))
-        return ERR_INVALID_VALUE;
-    uint64_t size_bytes = size_mb * 1024ULL * 1024ULL;
-
-    // Открываем файл в режиме чтения/записи, создавая новый
     FILE *f = fopen(path, "wb+");
-    if (!f)
-        return ERR_DISK_OPEN;
+    if (!f) return ERR_DISK_OPEN;
+setvbuf(f, NULL, _IONBF, 0);
 
-    char *buffer = (char*)malloc(1024 * 1024); // 1 MB
+    // Буфер для записи нулей (1 MB)
+    size_t buf_size = 1024 * 1024;
+    uint8_t *buffer = (uint8_t*)malloc(buf_size);
     if (!buffer) {
         fclose(f);
-        return ERR_DISK_CREATE;
+        return ERR_OUT_OF_MEMORY;
     }
-    memset(buffer, 0, 1024 * 1024);
+    memset(buffer, 0, buf_size);
 
-    for (uint64_t i = 0; i < size_bytes; i += 1024 * 1024) {
-        size_t to_write = (size_bytes - i) < (1024 * 1024) ? (size_t)(size_bytes - i) : 1024 * 1024;
+    uint64_t remaining = size_bytes;
+    while (remaining > 0) {
+        size_t to_write = (remaining < buf_size) ? (size_t)remaining : buf_size;
         size_t written = fwrite(buffer, 1, to_write, f);
         if (written != to_write) {
             free(buffer);
             fclose(f);
             return ERR_DISK_WRITE;
         }
-        if (i % (10 * 1024 * 1024) == 0) {
-            printf("Progress: %" PRIu64 " / %" PRIu64 " MB\r", i / (1024 * 1024), size_mb);
-            fflush(stdout);
-        }
+        remaining -= written;
     }
-    free(buffer);
 
-    // Перематываем на начало для последующего чтения/записи
+    free(buffer);
     rewind(f);
 
-    // Заполняем структуру диска
     strncpy(disk->path, path, MAX_PATH - 1);
     disk->path[MAX_PATH - 1] = '\0';
     disk->size = size_bytes;
@@ -107,24 +93,18 @@ ErrorCode disk_create(const char *path, uint64_t size_mb, Disk *disk) {
     return ERR_OK;
 }
 
-// Прочитать с диска
-ErrorCode disk_read(Disk *disk, void *value, uint32_t size_value, uint64_t offset) {
-    if (!disk || !disk->is_open || !disk->file)
-		return ERR_DISK_OPEN;
-	else
-    if(_read(disk->file, value, size_value, offset) != size_value)
-		return ERR_DISK_READ;
-	else
-		return ERR_OK;
+ErrorCode disk_read(Disk *disk, void *buffer, uint64_t size, uint64_t offset) {
+    if (!disk || !disk->is_open || !disk->file) return ERR_DISK_OPEN;
+    if (offset + size > disk->size) return ERR_DISK_READ;
+    size_t read_bytes = disk_read_at(disk->file, buffer, size, offset);
+    if (read_bytes != size) return ERR_DISK_READ;
+    return ERR_OK;
 }
 
-// Записать на диск
-ErrorCode disk_write(Disk *disk, const void *value, uint32_t size_value, uint64_t offset) {
-    if (!disk || !disk->is_open || !disk->file)
-		return ERR_DISK_OPEN;
-	else
-    if(_write(disk->file, value, size_value, offset) != size_value)
-		return ERR_DISK_WRITE;
-	else
-		return ERR_OK;
+ErrorCode disk_write(Disk *disk, const void *data, uint64_t size, uint64_t offset) {
+    if (!disk || !disk->is_open || !disk->file) return ERR_DISK_OPEN;
+    if (offset + size > disk->size) return ERR_DISK_WRITE;
+    size_t written = disk_write_at(disk->file, data, size, offset);
+    if (written != size) return ERR_DISK_WRITE;
+    return ERR_OK;
 }

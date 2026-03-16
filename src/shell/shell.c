@@ -1,237 +1,618 @@
+#include "disk.h"
+#include "utils.h"
 #include "shell.h"
+#include "fat32.h"
+#include "cmd_fs.h"
+#include "partition.h"
+#include "error_codes.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
 
-// Нормализация пути: преобразует относительный путь в абсолютный с учётом текущего каталога
-static char *resolve_path(const char *cwd, const char *input) {
-    char *work;
-    if (input[0] == '/') {
-        work = strdup(input);
-    } else {
-        if (strcmp(cwd, "/") == 0) {
-            work = malloc(strlen(input) + 2);
-            if (work) sprintf(work, "/%s", input);
-        } else {
-            work = malloc(strlen(cwd) + strlen(input) + 2);
-            if (work) sprintf(work, "%s/%s", cwd, input);
+#define MAX_ARGS 10
+#define MAX_PATH 260
+#define MAX_CMD_LINE 1024
+
+// Глобальное состояние shell
+static struct {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    char current_path[MAX_PATH];
+    int is_open;
+    char part_str[16]; // для хранения номера раздела (на случай, если понадобится)
+} shell_state = { .is_open = 0 };
+
+// Прототипы статических функций
+static char* normalize_path(const char *path);
+static char* resolve_path(const char *input);
+static int parse_line(char *line, char **argv, int max_args);
+static void print_help(void);
+static int cmd_ls(int argc, char **argv);
+static int cmd_cd(int argc, char **argv);
+static int cmd_pwd(int argc, char **argv);
+static int cmd_mkdir(int argc, char **argv);
+static int cmd_rmdir(int argc, char **argv);
+static int cmd_rm(int argc, char **argv);
+static int cmd_copy(int argc, char **argv);
+static int cmd_reserve(int argc, char **argv);
+static int cmd_tree(int argc, char **argv);
+static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
+                       const char *name, const char *prefix, int is_last);
+static char* extract_lfn_name(const uint8_t *dir_buffer, uint32_t sfn_index);
+static void sfn_to_display_name(const uint8_t sfn[11], char *out, size_t out_size);
+static int strcasecmp_ascii(const char *a, const char *b);
+
+// ==================== Вспомогательные функции ====================
+
+static int strcasecmp_ascii(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = tolower((unsigned char)*a);
+        char cb = tolower((unsigned char)*b);
+        if (ca != cb) return (int)(ca - cb);
+        a++;
+        b++;
+    }
+    return (int)((unsigned char)*a - (unsigned char)*b);
+}
+
+static void sfn_to_display_name(const uint8_t sfn[11], char *out, size_t out_size) {
+    if (out_size < 13) return;
+    int pos = 0;
+    for (int i = 0; i < 8 && sfn[i] != ' '; i++) {
+        out[pos++] = (char)sfn[i];
+    }
+    if (sfn[8] != ' ') {
+        out[pos++] = '.';
+        for (int i = 0; i < 3 && sfn[8 + i] != ' '; i++) {
+            out[pos++] = (char)sfn[8 + i];
         }
     }
-    if (!work) return NULL;
+    out[pos] = '\0';
+}
 
-    char *components[256];
-    int comp_count = 0;
-    char *token = strtok(work, "/");
-    while (token) {
-        if (strcmp(token, ".") == 0) {
+static char* extract_lfn_name(const uint8_t *dir_buffer, uint32_t sfn_index) {
+    uint32_t lfn_start = sfn_index;
+    while (lfn_start > 0) {
+        const uint8_t *e = dir_buffer + (lfn_start - 1) * 32;
+        if (e[11] != FAT32_ATTR_LFN) break;
+        if (e[0] & 0x40) {
+            lfn_start--;
+            break;
+        }
+        lfn_start--;
+    }
+    if (lfn_start == sfn_index) return NULL;
+
+    uint32_t first_lfn = lfn_start;
+    while (first_lfn > 0) {
+        const uint8_t *e = dir_buffer + (first_lfn - 1) * 32;
+        if (e[11] != FAT32_ATTR_LFN) break;
+        first_lfn--;
+    }
+
+    uint16_t utf16[256];
+    size_t pos = 0;
+    for (uint32_t i = first_lfn; i < sfn_index; i++) {
+        const Fat32LongEntry *lfn = (const Fat32LongEntry*)(dir_buffer + i * 32);
+        if (lfn->attr != FAT32_ATTR_LFN) return NULL;
+        for (int j = 0; j < 5; j++) {
+            if (lfn->name1[j] != 0xFFFF) utf16[pos++] = lfn->name1[j];
+        }
+        for (int j = 0; j < 6; j++) {
+            if (lfn->name2[j] != 0xFFFF) utf16[pos++] = lfn->name2[j];
+        }
+        for (int j = 0; j < 2; j++) {
+            if (lfn->name3[j] != 0xFFFF) utf16[pos++] = lfn->name3[j];
+        }
+    }
+
+    char *name = (char*)malloc(pos + 1);
+    if (!name) return NULL;
+    for (size_t i = 0; i < pos; i++) {
+        name[i] = (char)(utf16[i] & 0x7F);
+    }
+    name[pos] = '\0';
+    return name;
+}
+
+// Инициализация shell
+static ErrorCode shell_init(const char *file, const char *part) {
+    if (shell_state.is_open) return ERR_OK;
+
+    ErrorCode err = disk_open(file, &shell_state.disk);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Error: cannot open disk image: %s\n", file);
+        return err;
+    }
+
+    PartitionTableType table_type;
+    err = partition_detect_type(&shell_state.disk, &table_type);
+    if (err != ERR_OK || table_type == PT_UNKNOWN) {
+        disk_close(&shell_state.disk);
+        fprintf(stderr, "Error: invalid partition table.\n");
+        return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
+    }
+
+    int part_index = parse_part_index(part);
+    if (part_index < 0) {
+        disk_close(&shell_state.disk);
+        fprintf(stderr, "Error: invalid partition number '%s'.\n", part);
+        return ERR_INVALID_ARGUMENT;
+    }
+
+    uint64_t size_sectors;
+    err = partition_get_info(&shell_state.disk, part_index, &shell_state.start_lba, &size_sectors);
+    if (err != ERR_OK) {
+        disk_close(&shell_state.disk);
+        if (err == ERR_NOT_FOUND)
+            fprintf(stderr, "Error: partition %d does not exist.\n", part_index + 1);
+        else
+            fprintf(stderr, "Error: cannot get partition info.\n");
+        return err;
+    }
+
+    err = fat32_get_info(&shell_state.disk, shell_state.start_lba, &shell_state.info);
+    if (err != ERR_OK) {
+        disk_close(&shell_state.disk);
+        fprintf(stderr, "Error: partition %d is not a valid FAT32 filesystem.\n", part_index + 1);
+        return ERR_INVALID_SIGNATURE;
+    }
+
+    strcpy(shell_state.current_path, "/");
+    strncpy(shell_state.part_str, part, sizeof(shell_state.part_str) - 1);
+    shell_state.part_str[sizeof(shell_state.part_str) - 1] = '\0';
+    shell_state.is_open = 1;
+    return ERR_OK;
+}
+
+static void shell_shutdown(void) {
+    if (shell_state.is_open) {
+        disk_close(&shell_state.disk);
+        shell_state.is_open = 0;
+    }
+}
+
+static char* normalize_path(const char *path) {
+    if (!path || path[0] != '/') return NULL;
+
+    char *result = malloc(MAX_PATH);
+    if (!result) return NULL;
+
+    char *out = result;
+    const char *in = path;
+    *out++ = '/';
+    in++;
+
+    while (*in) {
+        while (*in == '/') in++;
+        if (*in == '\0') break;
+
+        const char *start = in;
+        while (*in && *in != '/') in++;
+        size_t len = in - start;
+
+        if (len == 1 && start[0] == '.') {
             // ничего
-        } else if (strcmp(token, "..") == 0) {
-            if (comp_count > 0) comp_count--;
+        } else if (len == 2 && start[0] == '.' && start[1] == '.') {
+            if (out > result + 1) {
+                out--;
+                while (out > result && *(out - 1) != '/') out--;
+            }
         } else {
-            components[comp_count++] = token;
+            if (*(out - 1) != '/') *out++ = '/';
+            memcpy(out, start, len);
+            out += len;
         }
-        token = strtok(NULL, "/");
     }
-
-    // Сборка нового пути
-    size_t new_len = 1; // начальный '/'
-    for (int i = 0; i < comp_count; i++) {
-        new_len += strlen(components[i]) + 1;
-    }
-    char *result = malloc(new_len);
-    if (!result) {
-        free(work);
-        return NULL;
-    }
-    result[0] = '/';
-    size_t pos = 1;
-    for (int i = 0; i < comp_count; i++) {
-        if (i > 0) result[pos++] = '/';
-        strcpy(result + pos, components[i]);
-        pos += strlen(components[i]);
-    }
-    if (comp_count == 0) {
-        result[1] = '\0'; // путь стал корнем
-    } else {
-        result[pos] = '\0';
-    }
-    free(work);
+    *out = '\0';
+    if (out == result + 1 && result[0] == '/') result[1] = '\0';
     return result;
 }
 
-// Разбор командной строки (до двух аргументов)
-static int parse_line(char *line, char **cmd, char **arg1, char **arg2) {
-    *cmd = *arg1 = *arg2 = NULL;
-    char *p = line;
-
-    // Пропустить начальные пробелы
-    while (*p && isspace((unsigned char)*p)) p++;
-    if (*p == '\0') return 0;
-
-    // Команда (без кавычек, т.к. команды не содержат пробелов)
-    *cmd = p;
-    while (*p && !isspace((unsigned char)*p)) p++;
-    if (*p) *p++ = '\0';
-
-    // Пропустить пробелы после команды
-    while (*p && isspace((unsigned char)*p)) p++;
-
-    // Вспомогательная функция для разбора одного аргумента
-    char *parse_argument(char **pos) {
-        char *start = *pos;
-        if (*start == '"') {
-            // Аргумент в двойных кавычках
-            start++; // пропускаем открывающую кавычку
-            char *end = strchr(start, '"');
-            if (!end) return NULL; // нет закрывающей кавычки
-            *end = '\0'; // завершаем строку
-            *pos = end + 1; // позиция после кавычки
-            return start;
-        } else {
-            // Обычный аргумент до пробела
-            char *end = start;
-            while (*end && !isspace((unsigned char)*end)) end++;
-            if (*end) *end++ = '\0';
-            *pos = end;
-            return start;
-        }
-    };
-
-    if (*p) {
-        *arg1 = parse_argument(&p);
-        if (!*arg1) return 0;
-        // Пропустить пробелы после первого аргумента
-        while (*p && isspace((unsigned char)*p)) p++;
-        if (*p) {
-            *arg2 = parse_argument(&p);
-        }
+static char* resolve_path(const char *input) {
+    if (!input) return NULL;
+    char *full;
+    if (input[0] == '/') {
+        full = my_strdup(input);
+    } else {
+        char temp[MAX_PATH];
+        snprintf(temp, sizeof(temp), "%s/%s", shell_state.current_path, input);
+        full = my_strdup(temp);
     }
-    return 1;
+    if (!full) return NULL;
+    char *norm = normalize_path(full);
+    free(full);
+    return norm;
 }
 
-void run_shell(Disk *disk, uint64_t start_lba) {
-    // Получаем информацию о разделе один раз при старте
-    Fat32PartInfo info;
-    ErrorCode err = fat32_get_part_info(disk, start_lba, &info);
+static int parse_line(char *line, char **argv, int max_args) {
+    int argc = 0;
+    char *p = line;
+    while (*p) {
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == '\0') break;
+        if (argc >= max_args) return -1;
+
+        if (*p == '"') {
+            p++;
+            argv[argc] = p;
+            while (*p && *p != '"') p++;
+            if (*p == '"') {
+                *p++ = '\0';
+            } else {
+                return -1;
+            }
+        } else {
+            argv[argc] = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            if (*p) *p++ = '\0';
+        }
+        argc++;
+    }
+    return argc;
+}
+
+static void print_help(void) {
+    printf("Available commands:\n");
+    printf("  ls [path]                 - list directory contents\n");
+    printf("  cd [path]                 - change current directory (default: root)\n");
+    printf("  pwd                       - print current directory\n");
+    printf("  mkdir <path>              - create directory\n");
+    printf("  rmdir <path>              - remove empty directory\n");
+    printf("  rm <path>                 - delete file\n");
+    printf("  copy <host-file> <dest>   - copy file from host to image\n");
+    printf("  tree [path]               - display directory tree\n");
+    printf("\n - A common command for working with the file registry -\n");
+    printf("  reserve init              - initialize reserve cluster\n");
+    printf("  reserve ls                - list reserve entries\n");
+    printf("  reserve add <path>        - add file entry to reserve\n");
+    printf("  reserve rm <name>         - remove entry by name\n");
+    printf("  reserve clear             - clear all entries\n");
+    printf("  reserve dump              - hex dump of reserve cluster\n");
+    printf("  reserve info              - show reserve info\n\n");
+    printf("  exit                      - exit shell\n");
+    printf("  help, ?                   - show this help\n");
+}
+
+// ==================== Обработчики команд ====================
+
+static int cmd_ls(int argc, char **argv) {
+    const char *path = (argc > 1) ? argv[1] : ".";
+    char *abs_path = resolve_path(path);
+    if (!abs_path) {
+        fprintf(stderr, "Error: invalid path.\n");
+        return 1;
+    }
+    ErrorCode err = fat32_list_dir(&shell_state.disk, shell_state.start_lba, abs_path);
+    free(abs_path);
     if (err != ERR_OK) {
-        printf("Error: cannot read FAT32 filesystem info.\n");
+        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_cd(int argc, char **argv) {
+    const char *target = (argc > 1) ? argv[1] : "/";
+    char *abs_path = resolve_path(target);
+    if (!abs_path) {
+        fprintf(stderr, "Error: invalid path.\n");
+        return 1;
+    }
+    uint32_t cluster;
+    ErrorCode err = fat32_find_dir(&shell_state.disk, &shell_state.info, abs_path, &cluster);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Error: directory not found.\n");
+        free(abs_path);
+        return 1;
+    }
+    strcpy(shell_state.current_path, abs_path);
+    free(abs_path);
+    return 0;
+}
+
+static int cmd_pwd(int argc, char **argv) {
+    (void)argc; (void)argv;
+    printf("%s\n", shell_state.current_path);
+    return 0;
+}
+
+static int cmd_mkdir(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: mkdir <path>\n");
+        return 1;
+    }
+    char *abs_path = resolve_path(argv[1]);
+    if (!abs_path) {
+        fprintf(stderr, "Error: invalid path.\n");
+        return 1;
+    }
+    ErrorCode err = fat32_create_dir(&shell_state.disk, shell_state.start_lba, abs_path);
+    free(abs_path);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_rmdir(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: rmdir <path>\n");
+        return 1;
+    }
+    char *abs_path = resolve_path(argv[1]);
+    if (!abs_path) {
+        fprintf(stderr, "Error: invalid path.\n");
+        return 1;
+    }
+    ErrorCode err = fat32_remove_dir(&shell_state.disk, shell_state.start_lba, abs_path);
+    free(abs_path);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_rm(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: rm <path>\n");
+        return 1;
+    }
+    char *abs_path = resolve_path(argv[1]);
+    if (!abs_path) {
+        fprintf(stderr, "Error: invalid path.\n");
+        return 1;
+    }
+    ErrorCode err = fat32_delete_file(&shell_state.disk, shell_state.start_lba, abs_path);
+    free(abs_path);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_copy(int argc, char **argv) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: copy <host-file> <dest>\n");
+        return 1;
+    }
+    char *abs_dest = resolve_path(argv[2]);
+    if (!abs_dest) {
+        fprintf(stderr, "Error: invalid destination path.\n");
+        return 1;
+    }
+    ErrorCode err = fat32_copy_file(&shell_state.disk, shell_state.start_lba, argv[1], abs_dest);
+    free(abs_dest);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_reserve(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: reserve <subcommand> [args]\n");
+        return 1;
+    }
+    const char *sub = argv[1];
+
+    if (strcmp(sub, "init") == 0) {
+        ErrorCode err = fat32_reserve_init(&shell_state.disk, shell_state.start_lba);
+        if (err != ERR_OK) {
+            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            return 1;
+        }
+        printf("Reserve cluster initialized.\n");
+    } else if (strcmp(sub, "ls") == 0) {
+        ErrorCode err = fat32_reserve_list(&shell_state.disk, shell_state.start_lba);
+        if (err != ERR_OK) {
+            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            return 1;
+        }
+    } else if (strcmp(sub, "add") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "Usage: reserve add <path>\n");
+            return 1;
+        }
+        char *abs_path = resolve_path(argv[2]);
+        if (!abs_path) {
+            fprintf(stderr, "Error: invalid path.\n");
+            return 1;
+        }
+        ErrorCode err = fat32_reserve_add(&shell_state.disk, shell_state.start_lba, abs_path);
+        free(abs_path);
+        if (err != ERR_OK) {
+            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            return 1;
+        }
+        printf("Entry added.\n");
+    } else if (strcmp(sub, "rm") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "Usage: reserve rm <name>\n");
+            return 1;
+        }
+        ErrorCode err = fat32_reserve_remove(&shell_state.disk, shell_state.start_lba, argv[2]);
+        if (err != ERR_OK) {
+            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            return 1;
+        }
+        printf("Entry removed.\n");
+    } else if (strcmp(sub, "clear") == 0) {
+        ErrorCode err = fat32_reserve_clear(&shell_state.disk, shell_state.start_lba);
+        if (err != ERR_OK) {
+            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            return 1;
+        }
+        printf("Reserve cleared.\n");
+    } else if (strcmp(sub, "dump") == 0) {
+        ErrorCode err = fat32_reserve_dump(&shell_state.disk, shell_state.start_lba);
+        if (err != ERR_OK) {
+            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            return 1;
+        }
+    } else if (strcmp(sub, "info") == 0) {
+        ErrorCode err = fat32_reserve_info(&shell_state.disk, shell_state.start_lba);
+        if (err != ERR_OK) {
+            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            return 1;
+        }
+    } else {
+        fprintf(stderr, "Unknown reserve subcommand: %s\n", sub);
+        return 1;
+    }
+    return 0;
+}
+
+static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
+                       const char *name, const char *prefix, int is_last) {
+    printf("%s%s%s\n", prefix, (is_last ? "'-- " : "|-- "), name);
+
+    uint8_t *buffer = NULL;
+    uint32_t entries = 0;
+    if (fat32_read_dir(disk, info, cluster, &buffer, &entries) != ERR_OK) {
         return;
     }
 
-    char *cwd = strdup("/");
-    char line[1024];
+    typedef struct {
+        uint32_t cluster;
+        char *name;
+        int is_dir;
+        uint32_t size;
+    } child_entry_t;
 
-    printf("Entering interactive shell. Type 'help' for commands.\n");
+    child_entry_t *children = NULL;
+    uint32_t child_count = 0;
 
+    for (uint32_t i = 0; i < entries; i++) {
+        const uint8_t *entry = buffer + i * 32;
+        if (entry[0] == 0x00) break;
+        if (entry[0] == 0xE5) continue;
+        if (entry[11] == FAT32_ATTR_LFN) continue;
+
+        Fat32ShortEntry *se = (Fat32ShortEntry*)entry;
+        char display_name[256];
+
+        char *long_name = extract_lfn_name(buffer, i);
+        if (long_name) {
+            strcpy(display_name, long_name);
+            free(long_name);
+        } else {
+            sfn_to_display_name(se->name, display_name, sizeof(display_name));
+        }
+
+        if (strcmp(display_name, ".") == 0 || strcmp(display_name, "..") == 0)
+            continue;
+
+        children = realloc(children, (child_count + 1) * sizeof(child_entry_t));
+        children[child_count].name = strdup(display_name);
+        children[child_count].cluster = ((uint32_t)se->first_cluster_hi << 16) | se->first_cluster_lo;
+        children[child_count].is_dir = (se->attr & FAT32_ATTR_DIRECTORY) != 0;
+        children[child_count].size = se->file_size;
+        child_count++;
+    }
+
+    free(buffer);
+
+    char new_prefix[512];
+    snprintf(new_prefix, sizeof(new_prefix), "%s%s", prefix, (is_last ? "    " : "|   "));
+
+    for (uint32_t i = 0; i < child_count; i++) {
+        child_entry_t *child = &children[i];
+        int last = (i == child_count - 1);
+
+        if (child->is_dir) {
+            print_tree(disk, info, child->cluster, child->name, new_prefix, last);
+        } else {
+            char file_info[256];
+            snprintf(file_info, sizeof(file_info), "%s (%u bytes)", child->name, child->size);
+            printf("%s%s%s\n", new_prefix, (last ? "'-- " : "|-- "), file_info);
+        }
+        free(child->name);
+    }
+    free(children);
+}
+
+static int cmd_tree(int argc, char **argv) {
+    const char *path = (argc > 1) ? argv[1] : ".";
+    char *abs_path = resolve_path(path);
+    if (!abs_path) {
+        fprintf(stderr, "Error: invalid path.\n");
+        return 1;
+    }
+
+    uint32_t cluster;
+    ErrorCode err = fat32_find_dir(&shell_state.disk, &shell_state.info, abs_path, &cluster);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Error: cannot find path.\n");
+        free(abs_path);
+        return 1;
+    }
+
+    printf("Directory tree of %s:\n", abs_path);
+    print_tree(&shell_state.disk, &shell_state.info, cluster, abs_path, "", 1);
+    free(abs_path);
+    return 0;
+}
+
+// ==================== Главная функция shell ====================
+
+ErrorCode cmd_shell(CMDArgs *args) {
+    ErrorCode err = shell_init(args->file, args->part);
+    if (err != ERR_OK) return err;
+
+    printf("FAT32 Shell. Type 'help' for commands.\n");
+
+    char line[MAX_CMD_LINE];
     while (1) {
-        printf("%s> ", cwd);
+        printf("fs> ");
+        fflush(stdout);
         if (!fgets(line, sizeof(line), stdin)) break;
         line[strcspn(line, "\n")] = '\0';
 
-        char *cmd, *arg1, *arg2;
-        if (!parse_line(line, &cmd, &arg1, &arg2)) continue;
+        if (line[0] == '\0') continue;
 
+        char *argv[MAX_ARGS];
+        int argc = parse_line(line, argv, MAX_ARGS);
+        if (argc < 0) {
+            fprintf(stderr, "Error: invalid command line (too many args or unmatched quotes).\n");
+            continue;
+        }
+        if (argc == 0) continue;
+
+        const char *cmd = argv[0];
         if (strcmp(cmd, "exit") == 0) {
             break;
         } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
-            print_shell_help();
-        } else if (strcmp(cmd, "pwd") == 0) {
-            printf("%s\n", cwd);
-        } else if (strcmp(cmd, "cd") == 0) {
-            if (!arg1) {
-                free(cwd);
-                cwd = strdup("/");
-                continue;
-            }
-            char *new_path = resolve_path(cwd, arg1);
-            if (!new_path) {
-                printf("Error: cannot resolve path\n");
-                continue;
-            }
-            uint32_t cluster;
-            ErrorCode err = fat32_find_dir(disk, &info, new_path, &cluster);
-            if (err != ERR_OK) {
-                printf("Error: directory '%s' not found\n", arg1);
-                free(new_path);
-                continue;
-            }
-            free(cwd);
-            cwd = new_path;
+            print_help();
         } else if (strcmp(cmd, "ls") == 0) {
-            const char *target = arg1 ? arg1 : ".";
-            char *full_path = resolve_path(cwd, target);
-            if (!full_path) {
-                printf("Error: cannot resolve path\n");
-                continue;
-            }
-            err = fat32_list_dir(disk, start_lba, full_path);
-            free(full_path);
+            cmd_ls(argc, argv);
+        } else if (strcmp(cmd, "cd") == 0) {
+            cmd_cd(argc, argv);
+        } else if (strcmp(cmd, "pwd") == 0) {
+            cmd_pwd(argc, argv);
         } else if (strcmp(cmd, "mkdir") == 0) {
-            if (!arg1) {
-                printf("Usage: mkdir <path>\n");
-                continue;
-            }
-            char *full_path = resolve_path(cwd, arg1);
-            if (!full_path) {
-                printf("Error: cannot resolve path\n");
-                continue;
-            }
-            err = fat32_create_dir(disk, start_lba, full_path);
-            free(full_path);
+            cmd_mkdir(argc, argv);
         } else if (strcmp(cmd, "rmdir") == 0) {
-            if (!arg1) {
-                printf("Usage: rmdir <path>\n");
-                continue;
-            }
-            char *full_path = resolve_path(cwd, arg1);
-            if (!full_path) {
-                printf("Error: cannot resolve path\n");
-                continue;
-            }
-            err = fat32_remove_dir(disk, start_lba, full_path);
-            free(full_path);
+            cmd_rmdir(argc, argv);
         } else if (strcmp(cmd, "rm") == 0) {
-            if (!arg1) {
-                printf("Usage: rm <path>\n");
-                continue;
-            }
-            char *full_path = resolve_path(cwd, arg1);
-            if (!full_path) {
-                printf("Error: cannot resolve path\n");
-                continue;
-            }
-            err = fat32_delete_file(disk, start_lba, full_path);
-            free(full_path);
+            cmd_rm(argc, argv);
         } else if (strcmp(cmd, "copy") == 0) {
-            if (!arg1 || !arg2) {
-                printf("Usage: copy <host_file> <dest_path>\n");
-                continue;
-            }
-            char *full_dest = resolve_path(cwd, arg2);
-            if (!full_dest) {
-                printf("Error: cannot resolve destination path\n");
-                continue;
-            }
-            err = fat32_copy_file(disk, start_lba, arg1, full_dest);
-            free(full_dest);
+            cmd_copy(argc, argv);
+        } else if (strcmp(cmd, "tree") == 0) {
+            cmd_tree(argc, argv);
         } else if (strcmp(cmd, "reserve") == 0) {
-			uint32_t cluster = fat32_alloc_cluster(disk, &info);
-			if (cluster == 0) {
-				printf("Error: no free clusters.\n");
-			} else {
-				ErrorCode err = fat32_write_reserved_cluster(disk, start_lba, cluster);
-				if (err == ERR_OK) {
-					printf("Reserved cluster %u written to BPB reserved area.\n", cluster);
-				} else {
-					printf("Error writing to BPB (code %d).\n", err);
-				}
-			}
-		} else {
-            printf("Unknown command: %s\n", cmd);
+            cmd_reserve(argc, argv);
+        } else {
+            fprintf(stderr, "Unknown command: %s\n", cmd);
         }
     }
 
-    free(cwd);
-    printf("Exiting shell.\n");
+    shell_shutdown();
+    return ERR_OK;
 }

@@ -1,9 +1,10 @@
-#pragma once
+#ifndef DISK_H
+#define DISK_H
 
-#include "error_code.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "error_codes.h"
 
 #define SECTOR_SIZE 512
 #define MAX_PATH 260
@@ -17,59 +18,56 @@
 #endif
 
 /**
- * Структура, представляющая открытый виртуальный диск.
+ * @brief Структура, представляющая открытый виртуальный диск.
  */
 typedef struct {
-    char path[MAX_PATH];      ///< Путь к файлу диска
-    uint64_t size;            ///< Размер диска в байтах
-    FILE *file;               ///< Указатель на открытый файл (NULL, если диск не открыт)
-    int is_open;              ///< Флаг: 1 – диск открыт, 0 – закрыт
+    char path[MAX_PATH];      /**< Путь к файлу диска */
+    uint64_t size;            /**< Размер диска в байтах */
+    FILE *file;               /**< Указатель на открытый файл (NULL, если диск не открыт) */
+    int is_open;              /**< Флаг: 1 – диск открыт, 0 – закрыт */
 } Disk;
 
 /**
- * Открывает существующий файл диска для чтения/записи.
- *
+ * @brief Открывает существующий файл диска для чтения/записи.
  * @param path Путь к файлу диска.
  * @param disk Указатель на структуру Disk, которая будет заполнена.
- * @return Код ошибки: ERR_OK при успехе, иначе ERR_DISK_OPEN или ERR_DISK_SEEK.
+ * @return ErrorCode: ERR_OK при успехе, иначе ERR_DISK_OPEN или ERR_DISK_SEEK.
  */
 ErrorCode disk_open(const char *path, Disk *disk);
 
 /**
- * Закрывает открытый диск (если он был открыт).
- *
+ * @brief Закрывает открытый диск (если он был открыт).
  * @param disk Указатель на структуру Disk.
  */
 void disk_close(Disk *disk);
 
 /**
- * Создаёт новый файл диска заданного размера, заполняя его нулями.
- *
+ * @brief Создаёт новый файл диска заданного размера, заполняя его нулями.
  * @param path Путь для нового файла.
- * @param size_mb Размер в мегабайтах.
+ * @param size_bytes Размер в байтах.
  * @param disk Указатель на структуру Disk (после создания диск остаётся открытым).
- * @return Код ошибки: ERR_OK при успехе, иначе ERR_DISK_CREATE, ERR_DISK_WRITE.
+ * @return ErrorCode: ERR_OK при успехе, иначе ERR_DISK_CREATE, ERR_DISK_WRITE, ERR_OUT_OF_MEMORY.
  */
-ErrorCode disk_create(const char *path, uint64_t size_mb, Disk *disk);
+ErrorCode disk_create(const char *path, uint64_t size_bytes, Disk *disk);
 
 /**
- * Читает данные с диска.
- *
+ * @brief Читает данные с диска.
  * @param disk Указатель на открытый диск.
- * @param value Буфер для чтения.
- * @param size_value Количество байт для чтения.
+ * @param buffer Буфер для чтения.
+ * @param size Количество байт для чтения.
  * @param offset Смещение от начала диска в байтах.
- * @return Код ошибки: ERR_OK при успехе, иначе ERR_DISK_OPEN, ERR_DISK_READ.
+ * @return ErrorCode: ERR_OK при успехе, иначе ERR_DISK_OPEN, ERR_DISK_READ.
  */
-ErrorCode disk_read(Disk *disk, void *value, uint32_t size_value, uint64_t offset);
+ErrorCode disk_read(Disk *disk, void *buffer, uint64_t size, uint64_t offset);
 
 /**
- * Записывает данные на диск.
- *
+ * @brief Записывает данные на диск.
  * @param disk Указатель на открытый диск.
- * @param value Буфер с данными для записи.
- * @param size_value Количество байт для записи.
+ * @param data Буфер с данными для записи.
+ * @param size Количество байт для записи.
  * @param offset Смещение от начала диска в байтах.
- * @return Код ошибки: ERR_OK при успехе, иначе ERR_DISK_OPEN, ERR_DISK_WRITE.
+ * @return ErrorCode: ERR_OK при успехе, иначе ERR_DISK_OPEN, ERR_DISK_WRITE.
  */
-ErrorCode disk_write(Disk *disk, const void *value, uint32_t size_value, uint64_t offset);
+ErrorCode disk_write(Disk *disk, const void *data, uint64_t size, uint64_t offset);
+
+#endif
