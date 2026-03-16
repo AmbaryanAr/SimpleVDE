@@ -144,8 +144,7 @@ ErrorCode mbr_delete_partition(Disk *disk, int index) {
         return ERR_INVALID_VALUE;
 	
     // Зануляем запись раздела
-    memset(sector + PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE,
-           0, PARTITION_ENTRY_SIZE);
+    memset(sector + PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE, 0, PARTITION_ENTRY_SIZE);
 
     return disk_write(disk, sector, SECTOR_SIZE, 0);
 }

@@ -3,7 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
-// *** Вспомогательная функция ***
+#ifdef _WIN32
+#define strcasecmp _stricmp
+#endif
+
 /**
  * Генерирует случайный GUID (UUID версии 4) для использования в GPT.
  * 
@@ -19,11 +22,9 @@
  * @param guid Указатель на массив из 16 байт, куда будет записан GUID.
  */
 static void generate_guid(uint8_t *guid) {
-    srand(time(NULL));
     for (int i = 0; i < 16; i++) {
         guid[i] = rand() & 0xFF;
     }
-    // Установить версию 4 (случайный GUID)
     guid[6] = (guid[6] & 0x0F) | 0x40;
     guid[8] = (guid[8] & 0x3F) | 0x80;
 }
@@ -52,7 +53,6 @@ static uint32_t crc32(const void *data, size_t len) {
     return ~crc;
 }
 
-// Проверка, пуста ли запись раздела (все байты нулевые)
 static bool gpt_partition_is_empty(const GPTPartitionEntry *entry) {
     const uint8_t *p = (const uint8_t*)entry;
     for (size_t i = 0; i < sizeof(GPTPartitionEntry); i++) {
@@ -61,7 +61,6 @@ static bool gpt_partition_is_empty(const GPTPartitionEntry *entry) {
     return true;
 }
 
-// Найти следующую свободную LBA
 static uint64_t gpt_find_next_free_lba(const GPTPartitionEntry *partitions, uint32_t num_entries, uint64_t first_usable, uint64_t last_usable) {
     uint64_t next = first_usable;
     for (uint32_t i = 0; i < num_entries; i++) {
@@ -70,32 +69,26 @@ static uint64_t gpt_find_next_free_lba(const GPTPartitionEntry *partitions, uint
             if (end > next) next = end;
         }
     }
-    if (next > last_usable) next = last_usable + 1; // переполнение (нет места)
+    if (next > last_usable) next = last_usable + 1;
     return next;
 }
 
 static int gpt_initialize(MBR *mbr, GPTHeader *header, uint64_t disk_sectors, uint32_t num_partitions) {
     if (!mbr || !header || disk_sectors < 34) return -1;
 
-    // Обнуляем весь MBR
     memset(mbr, 0, sizeof(MBR));
-
-    // Заполняем защитную запись (первая)
     mbr->partitions[0].boot_flag = 0;
     mbr->partitions[0].start_head = 0;
     mbr->partitions[0].start_sector = 1;
     mbr->partitions[0].start_cylinder = 0;
-    mbr->partitions[0].partition_type = 0xEE;  // GPT protective
+    mbr->partitions[0].partition_type = 0xEE;
     mbr->partitions[0].end_head = 0xFF;
     mbr->partitions[0].end_sector = 0xFF;
     mbr->partitions[0].end_cylinder = 0xFF;
     mbr->partitions[0].lba_start = 1;
     mbr->partitions[0].sector_count = (disk_sectors - 1 > UINT32_MAX) ? UINT32_MAX : (uint32_t)(disk_sectors - 1);
+    mbr->signature = MBR_SIGNATURE;
 
-    // Остальные записи уже нулевые (memset)
-    mbr->signature = MBR_SIGNATURE;  // 0xAA55
-
-    // Заполнение заголовка GPT (без изменений)
     memset(header, 0, sizeof(GPTHeader));
     memcpy(header->signature, GPT_SIGNATURE, 8);
     header->revision = GPT_REVISION;
@@ -110,8 +103,6 @@ static int gpt_initialize(MBR *mbr, GPTHeader *header, uint64_t disk_sectors, ui
     header->num_partition_entries = num_partitions;
     header->partition_entry_size = 128;
     header->partitions_crc32 = 0;
-    // CRC заголовка будет вычислен позже
-
     return 0;
 }
 
@@ -126,7 +117,6 @@ static const struct {
     {"windows",    GPT_TYPE_WINDOWS_BASIC_DATA},
     {NULL, {0}}
 };
-// ***
 
 int gpt_type_from_name(const char *name, uint8_t *guid) {
     for (int i = 0; gpt_type_names[i].name != NULL; i++) {
@@ -138,14 +128,13 @@ int gpt_type_from_name(const char *name, uint8_t *guid) {
     return -1;
 }
 
-
 ErrorCode gpt_create(Disk *disk) {
     if (!disk || !disk->is_open)
         return ERR_DISK_OPEN;
 
     uint64_t disk_sectors = disk->size / SECTOR_SIZE;
     if (disk_sectors < 34) {
-        return ERR_DISK_CREATE;  // диск слишком мал для GPT
+        return ERR_DISK_CREATE;
     }
 
     MBR mbr;
@@ -153,7 +142,6 @@ ErrorCode gpt_create(Disk *disk) {
     if (gpt_initialize(&mbr, &header, disk_sectors, 128) != 0)
         return ERR_DISK_CREATE;
 
-    // Выделяем память под таблицу разделов (128 записей)
     uint32_t num_entries = header.num_partition_entries;
     size_t table_size = num_entries * sizeof(GPTPartitionEntry);
     GPTPartitionEntry *partitions = (GPTPartitionEntry*)calloc(1, table_size);
@@ -161,35 +149,29 @@ ErrorCode gpt_create(Disk *disk) {
         return ERR_GENERIC;
     }
 
-    // Вычисляем CRC32 таблицы
     header.partitions_crc32 = crc32(partitions, table_size);
-
-    // Вычисляем CRC32 заголовка (с обнулённым полем header_crc32)
     header.header_crc32 = 0;
     header.header_crc32 = crc32(&header, GPT_HEADER_SIZE);
 
-    // Запись защитного MBR (сектор 0)
     ErrorCode err = disk_write(disk, &mbr, sizeof(MBR), 0);
     if (err != ERR_OK) {
         free(partitions);
         return err;
     }
 
-    // Запись заголовка GPT (сектор 1)
     err = disk_write(disk, &header, sizeof(GPTHeader), 1 * SECTOR_SIZE);
     if (err != ERR_OK) {
         free(partitions);
         return err;
     }
 
-    // Запись таблицы разделов (начиная с LBA 2)
     uint64_t table_lba = header.partition_entry_lba;
     uint32_t sectors_per_table = (uint32_t)((table_size + SECTOR_SIZE - 1) / SECTOR_SIZE);
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
         uint8_t *ptr = (uint8_t*)partitions + i * SECTOR_SIZE;
         uint32_t chunk = (i == sectors_per_table - 1) ? (uint32_t)(table_size % SECTOR_SIZE) : SECTOR_SIZE;
-        if (chunk == 0) chunk = SECTOR_SIZE;  // если ровно по секторам
+        if (chunk == 0) chunk = SECTOR_SIZE;
         err = disk_write(disk, ptr, chunk, offset);
         if (err != ERR_OK) {
             free(partitions);
@@ -197,7 +179,6 @@ ErrorCode gpt_create(Disk *disk) {
         }
     }
 
-    // Резервная копия таблицы разделов (перед последним сектором)
     uint64_t backup_table_lba = header.backup_lba - sectors_per_table;
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (backup_table_lba + i) * SECTOR_SIZE;
@@ -211,22 +192,14 @@ ErrorCode gpt_create(Disk *disk) {
         }
     }
 
-    // Резервная копия заголовка GPT (последний сектор)
     err = disk_write(disk, &header, sizeof(GPTHeader), header.backup_lba * SECTOR_SIZE);
-    if (err != ERR_OK) {
-        free(partitions);
-        return err;
-    }
-
     free(partitions);
-    return ERR_OK;
+    return err;
 }
 
-// Создание раздела GPT
 ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, const uint8_t *type_guid) {
     if (!disk || !disk->is_open) return ERR_DISK_OPEN;
 
-    // Читаем заголовок GPT
     uint8_t header_sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, header_sector, SECTOR_SIZE, 1 * SECTOR_SIZE);
     if (err != ERR_OK) return err;
@@ -244,9 +217,8 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
     uint32_t sectors_per_table = (uint32_t)((table_size + SECTOR_SIZE - 1) / SECTOR_SIZE);
 
     GPTPartitionEntry *partitions = (GPTPartitionEntry*)malloc(table_size);
-    if (!partitions)
-        return ERR_GENERIC;
-    
+    if (!partitions) return ERR_GENERIC;
+
     uint64_t table_lba = header->partition_entry_lba;
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
@@ -258,27 +230,23 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
         }
     }
 
-    // Проверяем, свободна ли целевая запись
     if (!gpt_partition_is_empty(&partitions[index])) {
         free(partitions);
         return ERR_INVALID_VALUE;
     }
 
-    // Определяем стартовый LBA
     uint64_t first_usable = header->first_usable_lba;
     uint64_t last_usable = header->last_usable_lba;
     uint64_t start_lba = gpt_find_next_free_lba(partitions, num_entries, first_usable, last_usable);
-  
+
     if (start_lba > last_usable) {
         free(partitions);
         return ERR_INVALID_VALUE;
     }
 
-    // Если размер не указан, занимаем всё доступное место
     uint64_t free_sectors = last_usable - start_lba + 1;
     uint64_t size = size_sectors;
-    if (size == 0)
-        size = free_sectors;
+    if (size == 0) size = free_sectors;
 
     if (size > free_sectors || size == 0) {
         free(partitions);
@@ -290,7 +258,7 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
         free(partitions);
         return ERR_INVALID_VALUE;
     }
-    
+
     GPTPartitionEntry *entry = &partitions[index];
     memcpy(entry->type_guid, type_guid, 16);
     generate_guid(entry->partition_guid);
@@ -298,15 +266,15 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
     entry->last_lba = end_lba;
     entry->attributes = 0;
     memset(entry->partition_name, 0, sizeof(entry->partition_name));
-    
+
     uint32_t new_table_crc = crc32(partitions, table_size);
     header->partitions_crc32 = new_table_crc;
-    
+
     header->header_crc32 = 0;
     uint32_t new_header_crc = crc32(header, GPT_HEADER_SIZE);
     header->header_crc32 = new_header_crc;
-    
-    // Запись таблицы разделов (основная)
+
+    // Запись основной таблицы
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
         uint8_t *buf = (uint8_t*)partitions + i * SECTOR_SIZE;
@@ -318,7 +286,7 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
             return err;
         }
     }
-    
+
     // Резервная таблица
     uint64_t backup_table_lba = header->backup_lba - sectors_per_table;
     for (uint32_t i = 0; i < sectors_per_table; i++) {
@@ -332,23 +300,18 @@ ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, con
             return err;
         }
     }
-    
-    // Заголовок основной
+
+    // Основной заголовок
     err = disk_write(disk, header, sizeof(GPTHeader), 1 * SECTOR_SIZE);
     if (err != ERR_OK) {
         free(partitions);
         return err;
     }
-    
-    // Заголовок резервный
+
+    // Резервный заголовок
     err = disk_write(disk, header, sizeof(GPTHeader), header->backup_lba * SECTOR_SIZE);
-    if (err != ERR_OK) {
-        free(partitions);
-        return err;
-    }
-    
     free(partitions);
-    return ERR_OK;
+    return err;
 }
 
 ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid) {
@@ -387,7 +350,7 @@ ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid
 
     if (gpt_partition_is_empty(&partitions[index])) {
         free(partitions);
-        return ERR_INVALID_VALUE; // раздел не существует
+        return ERR_INVALID_VALUE;
     }
 
     memcpy(partitions[index].type_guid, type_guid, 16);
@@ -399,7 +362,6 @@ ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid
     uint32_t new_header_crc = crc32(header, GPT_HEADER_SIZE);
     header->header_crc32 = new_header_crc;
 
-    // Запись таблицы разделов (основная)
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
         uint8_t *buf = (uint8_t*)partitions + i * SECTOR_SIZE;
@@ -412,7 +374,6 @@ ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid
         }
     }
 
-    // Резервная таблица
     uint64_t backup_table_lba = header->backup_lba - sectors_per_table;
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (backup_table_lba + i) * SECTOR_SIZE;
@@ -426,22 +387,14 @@ ErrorCode gpt_set_partition_type(Disk *disk, int index, const uint8_t *type_guid
         }
     }
 
-    // Заголовок основной
     err = disk_write(disk, header, sizeof(GPTHeader), 1 * SECTOR_SIZE);
     if (err != ERR_OK) {
         free(partitions);
         return err;
     }
-
-    // Заголовок резервный
     err = disk_write(disk, header, sizeof(GPTHeader), header->backup_lba * SECTOR_SIZE);
-    if (err != ERR_OK) {
-        free(partitions);
-        return err;
-    }
-
     free(partitions);
-    return ERR_OK;
+    return err;
 }
 
 ErrorCode gpt_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uint64_t *size_sectors) {
@@ -516,19 +469,17 @@ int gpt_guid_from_string(const char *str, uint8_t *guid) {
 
 void gpt_print_info(Disk *disk) {
     uint8_t sector[SECTOR_SIZE];
-    // Читаем заголовок GPT (сектор 1)
     if (disk_read(disk, sector, SECTOR_SIZE, 1 * SECTOR_SIZE) != ERR_OK) {
         printf(" - Error: cannot read GPT header.\n");
         return;
     }
     GPTHeader *header = (GPTHeader*)sector;
-	
+
     if (memcmp(header->signature, GPT_SIGNATURE, 8) != 0) {
         printf(" - Error: invalid GPT signature.\n");
         return;
     }
 
-    // Вывод основной информации
     printf(" - Revision: %u.%u\n", header->revision >> 16, header->revision & 0xFFFF);
     printf(" - Disk GUID: ");
     char disk_guid_str[37];
@@ -538,7 +489,6 @@ void gpt_print_info(Disk *disk) {
     printf(" - Last usable LBA: %" PRIu64 "\n", header->last_usable_lba);
     printf(" - Number of partition entries: %u\n", header->num_partition_entries);
 
-    // Вычисляем размер таблицы и количество секторов
     uint32_t entry_size = header->partition_entry_size;
     if (entry_size != sizeof(GPTPartitionEntry)) {
         printf(" - Warning: unsupported partition entry size (%u), expected %zu. Aborting partition listing.\n",
@@ -551,14 +501,12 @@ void gpt_print_info(Disk *disk) {
     uint32_t sectors_per_table = (uint32_t)((table_size + SECTOR_SIZE - 1) / SECTOR_SIZE);
     uint64_t table_lba = header->partition_entry_lba;
 
-    // Выделяем память под таблицу
     GPTPartitionEntry *partitions = (GPTPartitionEntry*)malloc(table_size);
     if (!partitions) {
         printf(" - Error: out of memory.\n");
         return;
     }
 
-    // Читаем таблицу разделов
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
         uint8_t *buf = (uint8_t*)partitions + i * SECTOR_SIZE;
@@ -569,7 +517,6 @@ void gpt_print_info(Disk *disk) {
         }
     }
 
-    // Заголовок таблицы
     printf("\nPartition Table:\n");
     printf("--------------------------------------------------------\n");
     printf("No.  Type GUID                            Partition GUID                       Start LBA   End LBA     Size (MB)  Name\n");
@@ -588,7 +535,6 @@ void gpt_print_info(Disk *disk) {
             uint64_t sectors = end - start + 1;
             uint64_t size_mb = (sectors * SECTOR_SIZE) / (1024 * 1024);
 
-            // Имя в UTF-16LE преобразуем в ASCII (упрощённо: только латиница, игнорируем старший байт)
             char name_ascii[37] = {0};
             for (int j = 0; j < 36 && partitions[i].partition_name[j] != 0; j++) {
                 uint16_t wc = partitions[i].partition_name[j];
@@ -604,12 +550,10 @@ void gpt_print_info(Disk *disk) {
     if (count == 0) {
         printf("(no partitions)\n");
     }
-
     printf("--------------------------------------------------------\n");
     free(partitions);
 }
 
-// Удаление раздела GPT
 ErrorCode gpt_delete_partition(Disk *disk, int index) {
     if (!disk || !disk->is_open) return ERR_DISK_OPEN;
 
@@ -643,25 +587,20 @@ ErrorCode gpt_delete_partition(Disk *disk, int index) {
         }
     }
 
-    // Проверяем, существует ли раздел (не пустой)
     if (gpt_partition_is_empty(&partitions[index])) {
         free(partitions);
-        return ERR_INVALID_VALUE; // раздел не существует
+        return ERR_INVALID_VALUE;
     }
 
-    // Зануляем запись
     memset(&partitions[index], 0, entry_size);
 
-    // Пересчитываем CRC32 таблицы
     uint32_t new_table_crc = crc32(partitions, table_size);
     header->partitions_crc32 = new_table_crc;
 
-    // Вычисляем CRC32 заголовка (с обнулённым полем header_crc32)
     header->header_crc32 = 0;
     uint32_t new_header_crc = crc32(header, GPT_HEADER_SIZE);
     header->header_crc32 = new_header_crc;
 
-    // Запись таблицы разделов (основная)
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (table_lba + i) * SECTOR_SIZE;
         uint8_t *buf = (uint8_t*)partitions + i * SECTOR_SIZE;
@@ -674,7 +613,6 @@ ErrorCode gpt_delete_partition(Disk *disk, int index) {
         }
     }
 
-    // Резервная таблица
     uint64_t backup_table_lba = header->backup_lba - sectors_per_table;
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         uint64_t offset = (backup_table_lba + i) * SECTOR_SIZE;
@@ -688,20 +626,12 @@ ErrorCode gpt_delete_partition(Disk *disk, int index) {
         }
     }
 
-    // Заголовок основной
     err = disk_write(disk, header, sizeof(GPTHeader), 1 * SECTOR_SIZE);
     if (err != ERR_OK) {
         free(partitions);
         return err;
     }
-
-    // Заголовок резервный
     err = disk_write(disk, header, sizeof(GPTHeader), header->backup_lba * SECTOR_SIZE);
-    if (err != ERR_OK) {
-        free(partitions);
-        return err;
-    }
-
     free(partitions);
-    return ERR_OK;
+    return err;
 }

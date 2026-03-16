@@ -81,6 +81,20 @@ ErrorCode process_format(CommandArgs *args);
 ErrorCode process_write_mbr_loader(CommandArgs *args);
 ErrorCode process_write_bpb_loader(CommandArgs *args);
 
+/**
+ * Обрабатывает команду открытия интерактивной оболочки для работы с файловой системой раздела.
+ *
+ * Функция проверяет наличие обязательных аргументов -disk= и -index=,
+ * открывает указанный диск, определяет тип таблицы разделов,
+ * получает информацию о разделе (start LBA) и, если раздел отформатирован в FAT32,
+ * запускает интерактивную оболочку (shell), в которой доступны команды
+ * для навигации и управления файлами и каталогами.
+ *
+ * @param args Указатель на структуру с распарсенными аргументами командной строки.
+ * @return Код ошибки или ERR_OK.
+ */
+ErrorCode process_open(CommandArgs *args);
+
 ErrorCode process_ls(CommandArgs *args);
 ErrorCode process_copy(CommandArgs *args);
 ErrorCode process_rm(CommandArgs *args);

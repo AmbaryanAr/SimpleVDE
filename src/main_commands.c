@@ -1,4 +1,5 @@
 #include "main_commands.h"
+#include "shell.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -10,7 +11,9 @@
 #define strcasecmp _stricmp
 #endif
 
-// *** Вспомогательная функция для вывода аргументов ***
+#define CHECK_ARG(has, name) do { if (!(has)) { printf("Error: missing -%s= parameter.\n", name); return ERR_MISSING_ARGUMENT; } } while(0)
+
+// Функция для вывода аргументов
 static void print_args_summary(CommandArgs *args) {
     printf("Arguments received:\n");
     printf("  Command category: %s\n", args->command ? args->command : "NULL");
@@ -30,82 +33,58 @@ static void print_args_summary(CommandArgs *args) {
 }
 
 // Парсинг размера с поддержкой суффиксов K, M, G (по умолчанию M)
-// Возвращает true и записывает результат в *size_mb, иначе false
 static bool parse_number(const char *size_str, uint64_t *size_mb) {
     if (!size_str || !*size_str) return false;
 
     char *endptr;
     uint64_t value = strtoull(size_str, &endptr, 10);
-    if (endptr == size_str) return false; // нет цифр
+    if (endptr == size_str) return false;
     if (value <= 0) return false;
 
-    // Пропускаем пробелы после числа (хотя их быть не должно)
     while (*endptr == ' ') endptr++;
 
     char suffix = *endptr;
     if (suffix == '\0') {
-        // нет суффикса — считаем мегабайтами
         *size_mb = value;
         return true;
     }
 
-    // Приводим к верхнему регистру для простоты
     if (suffix >= 'a' && suffix <= 'z') suffix -= 32;
 
-	switch (suffix) {
-		case 'K':
-			*size_mb = value / 1024;
-			if (value % 1024 != 0) 
-				return false;
-			break;
-		case 'M':
-			*size_mb = value;
-			break;
-		case 'G':
-			*size_mb = value * 1024;
-			break;
-		default:
-			return false;
-	}
+    switch (suffix) {
+        case 'K':
+            *size_mb = value / 1024;
+            if (value % 1024 != 0) return false;
+            break;
+        case 'M':
+            *size_mb = value;
+            break;
+        case 'G':
+            *size_mb = value * 1024;
+            break;
+        default:
+            return false;
+    }
 
-    // Проверяем, что после суффикса ничего нет
     endptr++;
     if (*endptr != '\0') return false;
 
     return true;
 }
 
-// Парсинг целого числа с поддержкой десятичной и шестнадцатеричной записи (0x...)
+// Парсинг целого числа
 static bool parse_integer(const char *str, uint64_t *out) {
     if (!str || !*str) return false;
     char *endptr;
     errno = 0;
-    int64_t val = strtoll(str, &endptr, 0); // автоопределение основания
+    int64_t val = strtoll(str, &endptr, 0);
     if (endptr == str || *endptr != '\0' || errno == ERANGE) return false;
-    if (val < 0) return false; // отрицательные значения не допускаются
+    if (val < 0) return false;
     *out = val;
     return true;
 }
 
-/**
- * Открывает диск, проверяет индекс раздела и получает информацию о нём.
- *
- * Функция выполняет следующие действия:
- * 1. Открывает диск через cmd_disk_open_and_detect.
- * 2. Проверяет, что индекс раздела (пользовательский счёт с 1) корректен.
- * 3. В зависимости от типа таблицы (MBR или GPT) вызывает соответствующую
- *    функцию для получения начального LBA и, опционально, размера раздела.
- * 4. При возникновении ошибки выводит понятное сообщение и закрывает диск.
- *
- * @param args         Указатель на распарсенные аргументы (должны содержать disk_path и part_index_raw).
- * @param disk         Указатель на структуру Disk, которая будет заполнена при успехе.
- * @param table_type   Указатель на переменную для сохранения типа таблицы разделов.
- * @param start_lba    Указатель для сохранения начального LBA раздела.
- * @param size_sectors Указатель для сохранения размера раздела в секторах (может быть NULL, если не нужен).
- * @return Код ошибки или ERR_OK. При успехе диск остаётся открытым; вызывающий должен сам закрыть его.
- */
 static ErrorCode open_and_get_partition(CommandArgs *args, Disk *disk, PartitionTableType *table_type, uint64_t *start_lba, uint64_t *size_sectors) {
-    // Открываем диск и определяем тип таблицы
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, disk, table_type);
     if (err != ERR_OK) {
         if (err == ERR_DISK_OPEN)
@@ -115,7 +94,6 @@ static ErrorCode open_and_get_partition(CommandArgs *args, Disk *disk, Partition
         return err;
     }
 
-    // Парсим индекс (пользовательский счёт с 1)
     int index = atoi(args->part_index_raw) - 1;
     if (index < 0) {
         printf("Error: invalid partition index.\n");
@@ -123,7 +101,6 @@ static ErrorCode open_and_get_partition(CommandArgs *args, Disk *disk, Partition
         return ERR_INVALID_VALUE;
     }
 
-    // Получаем информацию о разделе в зависимости от типа таблицы
     if (*table_type == PT_MBR) {
         if (index >= 4) {
             printf("Error: MBR supports only 4 partitions (index 1-4).\n");
@@ -154,233 +131,187 @@ static ErrorCode open_and_get_partition(CommandArgs *args, Disk *disk, Partition
 
     return ERR_OK;
 }
-// ***
 
-// ---------- Функции для дисковых операций ----------
+static ErrorCode handle_mbr_create_partition(Disk *disk, int index, uint64_t size_sectors, CommandArgs *args) {
+    if (index >= 4) {
+        printf("ERROR: MBR supports only 4 partitions (index 1-4).\n");
+        return ERR_INVALID_VALUE;
+    }
+
+    uint8_t fs_type = 0x83;
+    if (args->has_type) {
+        if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+            char *endptr;
+            unsigned long val = strtoul(args->type_raw, &endptr, 16);
+            if (*endptr != '\0' || val > 0xFF) {
+                printf("ERROR: invalid filesystem type '%s'.\n", args->type_raw);
+                return ERR_INVALID_VALUE;
+            }
+            fs_type = (uint8_t)val;
+        } else {
+            fs_type = mbr_type_from_name(args->type_raw);
+            if (fs_type == 0xFF) {
+                printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+                return ERR_INVALID_VALUE;
+            }
+        }
+    }
+
+    if (size_sectors > UINT32_MAX) {
+        printf("ERROR: size too large for MBR partition (max 2 TiB).\n");
+        return ERR_INVALID_VALUE;
+    }
+    uint32_t mbr_size = (uint32_t)size_sectors;
+    ErrorCode err = mbr_create_partition(disk, index, mbr_size, fs_type);
+
+    if (err == ERR_OK) {
+        printf("Partition %d created successfully.\n", index + 1);
+    } else {
+        printf("ERROR: failed to create partition (code %d).\n", err);
+    }
+    return err;
+}
+
+static ErrorCode handle_gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, CommandArgs *args) {
+    uint8_t fs_guid[16];
+    if (args->has_type) {
+        if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+            if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
+                printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
+                return ERR_INVALID_VALUE;
+            }
+        } else {
+            if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
+                printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+                return ERR_INVALID_VALUE;
+            }
+        }
+    } else {
+        uint8_t default_guid[16] = GPT_TYPE_LINUX_FILESYSTEM;
+        memcpy(fs_guid, default_guid, 16);
+    }
+
+    ErrorCode err = gpt_create_partition(disk, index, size_sectors, fs_guid);
+    if (err == ERR_OK) {
+        printf("Partition %d created successfully.\n", index + 1);
+    } else {
+        printf("ERROR: failed to create GPT partition (code %d).\n", err);
+    }
+    return err;
+}
+
+// ---------- Disk operations ----------
 ErrorCode process_create_disk(CommandArgs *args) {
-	if (!args->has_path) {
-		printf("Error: missing -path= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_size) {
-		printf("Error: missing -size= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_type) {
-		printf("Error: missing -type= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    CHECK_ARG(args->has_path, "path");
+    CHECK_ARG(args->has_size, "size");
+    CHECK_ARG(args->has_type, "type");
 
     CreateDiskParams params;
-
-    // Путь
     strncpy(params.path, args->path, sizeof(params.path) - 1);
     params.path[sizeof(params.path) - 1] = '\0';
 
-    // Размер
     uint64_t size_mb = 0;
     if (!parse_number(args->size_raw, &size_mb) || size_mb <= 0)
         return ERR_INVALID_VALUE;
     params.size_mb = size_mb;
 
-    // Тип таблицы разделов
-    // args->type_raw гарантированно есть (has_type)
     strncpy(params.partition_type, args->type_raw, sizeof(params.partition_type) - 1);
     params.partition_type[sizeof(params.partition_type) - 1] = '\0';
 
-    // Вызов команды создания диска
-   return cmd_create_disk(&params);
+    return cmd_create_disk(&params);
 }
 
 ErrorCode process_disk_info(CommandArgs *args) {
-    if (!args->has_path){
-		printf("Error: missing -path= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-
+    CHECK_ARG(args->has_path, "path");
     return cmd_disk_info(args->path);
 }
 
 ErrorCode process_disk_read(CommandArgs *args) {
-	if (!args->has_path) {
-		printf("Error: missing -path= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_offset) {
-		printf("Error: missing -offset= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_size) {
-		printf("Error: missing -size= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    CHECK_ARG(args->has_path, "path");
+    CHECK_ARG(args->has_offset, "offset");
+    CHECK_ARG(args->has_size, "size");
 
-    // Парсинг offset и size (в секторах)
     uint64_t offset_sectors, size_sectors;
     if (!parse_integer(args->offset_raw, &offset_sectors)) {
-        printf("ERROR: Invalid offset value '%s' (must be non‑negative integer, decimal or hex)\n", args->offset_raw);
+        printf("ERROR: Invalid offset value '%s'\n", args->offset_raw);
         return ERR_INVALID_VALUE;
     }
     if (!parse_integer(args->size_raw, &size_sectors)) {
-        printf("ERROR: Invalid size value '%s' (must be non‑negative integer, decimal or hex)\n", args->size_raw);
+        printf("ERROR: Invalid size value '%s'\n", args->size_raw);
         return ERR_INVALID_VALUE;
     }
     if (size_sectors == 0) {
         printf("Warning: size is zero, nothing to read.\n");
         return ERR_OK;
     }
-	
+
     return cmd_disk_read_sector(args->path, offset_sectors, size_sectors);
 }
 
-// ---------- Функции для операций с разделами ----------
+// ---------- Partition operations ----------
 ErrorCode process_create_partition(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
 
-    // Парсим индекс (пользовательский счёт с 1)
     int index = atoi(args->part_index_raw) - 1;
     if (index < 0) {
         printf("ERROR: invalid partition index.\n");
         return ERR_INVALID_VALUE;
     }
 
-    // Открываем диск и определяем тип таблицы
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-	if (err != ERR_OK) {
-		if (err == ERR_DISK_OPEN)
-			printf("Error: cannot open disk file '%s'\n", args->disk_path);
-		else
-			printf("Error: failed to open disk (code %d)\n", err);
-		return err;
-	}
+    if (err != ERR_OK) {
+        if (err == ERR_DISK_OPEN)
+            printf("Error: cannot open disk file '%s'\n", args->disk_path);
+        else
+            printf("Error: failed to open disk (code %d)\n", err);
+        return err;
+    }
 
-    // Парсим размер (если не указан, будет 0 – занять всё свободное место)
-	uint64_t size_sectors = 0;
-	if (args->has_size) {
-		uint64_t size_mb;
-		if (!parse_number(args->size_raw, &size_mb)) {
-			printf("ERROR: invalid size format.\n");
-			disk_close(&disk);
-			return ERR_INVALID_VALUE;
-		}
-		uint64_t size_bytes = size_mb * 1024 * 1024;
-		if (size_bytes % SECTOR_SIZE != 0) {
-			printf("Warning: size not multiple of sector size (%d), rounding down.\n", SECTOR_SIZE);
-		}
-		size_sectors = size_bytes / SECTOR_SIZE;
-		if (size_sectors == 0) {
-			printf("ERROR: size too small (must be at least one sector).\n");
-			disk_close(&disk);
-			return ERR_INVALID_VALUE;
-		}
-	} else {
-		printf("No size specified, partition will occupy all free space.\n");
-	}
-
-    if (table_type == PT_MBR) {
-        if (index >= 4) {
-            printf("ERROR: MBR supports only 4 partitions (index 1-4).\n");
+    uint64_t size_sectors = 0;
+    if (args->has_size) {
+        uint64_t size_mb;
+        if (!parse_number(args->size_raw, &size_mb)) {
+            printf("ERROR: invalid size format.\n");
             disk_close(&disk);
             return ERR_INVALID_VALUE;
         }
-
-        // Определяем тип файловой системы
-        uint8_t fs_type = 0x83; // умолчание для MBR (Linux)
-        if (args->has_type) {
-			// Проверяем, похоже ли на hex (0x... или просто hex-цифры)
-			if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
-				char *endptr;
-				unsigned long val = strtoul(args->type_raw, &endptr, 16);
-				if (*endptr != '\0' || val > 0xFF) {
-					printf("ERROR: invalid filesystem type '%s'.\n", args->type_raw);
-					disk_close(&disk);
-					return ERR_INVALID_VALUE;
-				}
-				fs_type = (uint8_t)val;
-			} else {
-				fs_type = mbr_type_from_name(args->type_raw);
-				if (fs_type == 0xFF) {
-					printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
-					disk_close(&disk);
-					return ERR_INVALID_VALUE;
-				}
-			}
-		}
-
-		if (size_sectors > UINT32_MAX) {
-			printf("ERROR: size too large for MBR partition (max 2 TiB).\n");
-			disk_close(&disk);
-			return ERR_INVALID_VALUE;
-		}
-		uint32_t mbr_size = (uint32_t)size_sectors;
-		err = mbr_create_partition(&disk, index, mbr_size, fs_type);
-
-        if (err == ERR_OK) {
-            printf("Partition %d created successfully.\n", index + 1);
-        } else {
-            printf("ERROR: failed to create partition (code %d).\n", err);
+        uint64_t size_bytes = size_mb * 1024 * 1024;
+        if (size_bytes % SECTOR_SIZE != 0) {
+            printf("Warning: size not multiple of sector size (%d), rounding down.\n", SECTOR_SIZE);
         }
+        size_sectors = size_bytes / SECTOR_SIZE;
+        if (size_sectors == 0) {
+            printf("ERROR: size too small (must be at least one sector).\n");
+            disk_close(&disk);
+            return ERR_INVALID_VALUE;
+        }
+    } else {
+        printf("No size specified, partition will occupy all free space.\n");
+    }
+
+    if (table_type == PT_MBR) {
+        err = handle_mbr_create_partition(&disk, index, size_sectors, args);
     } else if (table_type == PT_GPT) {
-		// Для GPT индекс может быть до 128, проверять не здесь (функция сама проверит)
-		uint8_t fs_guid[16];
-		if (args->has_type) {
-			// Проверяем, похоже ли на hex (GUID в виде строки)
-			if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
-				if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
-					printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
-					disk_close(&disk);
-					return ERR_INVALID_VALUE;
-				}
-			} else {
-				if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
-					printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
-					disk_close(&disk);
-					return ERR_INVALID_VALUE;
-				}
-			}
-		} else {
-			// GUID по умолчанию (Linux filesystem)
-			uint8_t default_guid[16] = GPT_TYPE_LINUX_FILESYSTEM;
-			memcpy(fs_guid, default_guid, 16);
-		}
-		// Размер в секторах (уже посчитан ранее, в size_sectors)
-		err = gpt_create_partition(&disk, index, size_sectors, fs_guid);
-		if (err == ERR_OK) {
-			printf("Partition %d created successfully.\n", index + 1);
-		} else {
-			printf("ERROR: failed to create GPT partition (code %d).\n", err);
-		}
-	} else {
+        err = handle_gpt_create_partition(&disk, index, size_sectors, args);
+    } else {
         printf("ERROR: unknown partition table type.\n");
         err = ERR_INVALID_VALUE;
     }
-	
+
     disk_close(&disk);
     return err;
 }
 
 ErrorCode process_delete_partition(CommandArgs *args) {
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
 
     Disk disk;
     PartitionTableType table_type;
-    uint64_t start_lba; // не используется, но нужно для вызова
+    uint64_t start_lba;
     ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
     if (err != ERR_OK)
         return err;
@@ -401,7 +332,7 @@ ErrorCode process_delete_partition(CommandArgs *args) {
         if (err == ERR_OK) {
             printf("Partition %d deleted successfully.\n", index + 1);
         } else if (err == ERR_INVALID_VALUE) {
-            printf("Error: partition %d does not exist or invalid index.\n", index + 1);
+            printf("Error: partition %d does not exist.\n", index + 1);
         } else {
             printf("Error: failed to delete partition (code %d).\n", err);
         }
@@ -415,18 +346,9 @@ ErrorCode process_delete_partition(CommandArgs *args) {
 }
 
 ErrorCode process_set_active(CommandArgs *args) {
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_op) {
-        printf("Error: missing -op= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+    CHECK_ARG(args->has_op, "op");
 
     bool set_active;
     if (strcmp(args->op_raw, "active") == 0) {
@@ -467,7 +389,7 @@ ErrorCode process_set_active(CommandArgs *args) {
             }
             uint8_t part_type = sector[PARTITION_TABLE_OFFSET + index * PARTITION_ENTRY_SIZE + 4];
             if (part_type == 0) {
-                printf("Warning: partition %d does not exist (type=0). Nothing to deactivate.\n", index + 1);
+                printf("Warning: partition %d does not exist. Nothing to deactivate.\n", index + 1);
                 disk_close(&disk);
                 return ERR_OK;
             }
@@ -492,95 +414,86 @@ ErrorCode process_set_active(CommandArgs *args) {
 }
 
 ErrorCode process_set_type(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_part_index) {
-		printf("Error: missing -index= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_type) {
-		printf("Error: missing -fs= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+    CHECK_ARG(args->has_type, "fs");
 
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-	if (err != ERR_OK) {
-		if (err == ERR_DISK_OPEN)
-			printf("Error: cannot open disk file '%s'\n", args->disk_path);
-		else
-			printf("Error: failed to open disk (code %d)\n", err);
-		return err;
-	}
+    if (err != ERR_OK) {
+        if (err == ERR_DISK_OPEN)
+            printf("Error: cannot open disk file '%s'\n", args->disk_path);
+        else
+            printf("Error: failed to open disk (code %d)\n", err);
+        return err;
+    }
 
-	int index = atoi(args->part_index_raw) - 1;
-	if (index < 0) {
-		printf("Error: invalid partition index.\n");
-		disk_close(&disk);
-		return ERR_INVALID_VALUE;
-	}
-	if (table_type == PT_MBR && index >= 4) {
-		printf("Error: MBR supports only 4 partitions (index 1-4).\n");
-		disk_close(&disk);
-		return ERR_INVALID_VALUE;
-	}
+    int index = atoi(args->part_index_raw) - 1;
+    if (index < 0) {
+        printf("Error: invalid partition index.\n");
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
+    if (table_type == PT_MBR && index >= 4) {
+        printf("Error: MBR supports only 4 partitions (index 1-4).\n");
+        disk_close(&disk);
+        return ERR_INVALID_VALUE;
+    }
 
     if (table_type == PT_MBR) {
-		uint8_t fs_type;
-		if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
-			char *endptr;
-			unsigned long val = strtoul(args->type_raw, &endptr, 16);
-			if (*endptr != '\0' || val > 0xFF) {
-				printf("ERROR: invalid filesystem type '%s'.\n", args->type_raw);
-				disk_close(&disk);
-				return ERR_INVALID_VALUE;
-			}
-			fs_type = (uint8_t)val;
-		} else {
-			fs_type = mbr_type_from_name(args->type_raw);
-			if (fs_type == 0xFF) {
-				printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
-				disk_close(&disk);
-				return ERR_INVALID_VALUE;
-			}
-		}
+        uint8_t fs_type;
+        if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+            char *endptr;
+            unsigned long val = strtoul(args->type_raw, &endptr, 16);
+            if (*endptr != '\0' || val > 0xFF) {
+                printf("ERROR: invalid filesystem type '%s'.\n", args->type_raw);
+                disk_close(&disk);
+                return ERR_INVALID_VALUE;
+            }
+            fs_type = (uint8_t)val;
+        } else {
+            fs_type = mbr_type_from_name(args->type_raw);
+            if (fs_type == 0xFF) {
+                printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+                disk_close(&disk);
+                return ERR_INVALID_VALUE;
+            }
+        }
 
         err = mbr_set_partition_type(&disk, index, fs_type);
-		if (err == ERR_OK) {
-			printf("Partition %d type changed successfully.\n", index + 1);
-		} else if (err == ERR_INVALID_VALUE) {
-			printf("Error: partition %d does not exist.\n", index + 1);
-		} else {
-			printf("Error: failed to delete partition (code %d).\n", err);
-		}
+        if (err == ERR_OK) {
+            printf("Partition %d type changed successfully.\n", index + 1);
+        } else if (err == ERR_INVALID_VALUE) {
+            printf("Error: partition %d does not exist.\n", index + 1);
+        } else {
+            printf("Error: failed to change partition type (code %d).\n", err);
+        }
     } else if (table_type == PT_GPT) {
-		uint8_t fs_guid[16];
-		if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
-			if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
-				printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
-				disk_close(&disk);
-				return ERR_INVALID_VALUE;
-			}
-		} else {
-			if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
-				printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
-				disk_close(&disk);
-				return ERR_INVALID_VALUE;
-			}
-		}
+        uint8_t fs_guid[16];
+        if (strncmp(args->type_raw, "0x", 2) == 0 || isxdigit(args->type_raw[0])) {
+            if (gpt_guid_from_string(args->type_raw, fs_guid) != 0) {
+                printf("ERROR: invalid filesystem GUID '%s'.\n", args->type_raw);
+                disk_close(&disk);
+                return ERR_INVALID_VALUE;
+            }
+        } else {
+            if (gpt_type_from_name(args->type_raw, fs_guid) != 0) {
+                printf("ERROR: unknown filesystem name '%s'.\n", args->type_raw);
+                disk_close(&disk);
+                return ERR_INVALID_VALUE;
+            }
+        }
 
-		err = gpt_set_partition_type(&disk, index, fs_guid);
-		if (err == ERR_OK) {
-			printf("Partition %d type changed successfully.\n", index + 1);
-		} else if (err == ERR_INVALID_VALUE) {
-			printf("Error: partition %d does not exist or invalid GUID.\n", index + 1);
-		} else {
-			printf("Error: failed to change partition type (code %d).\n", err);
-		}
-	} else {
+        err = gpt_set_partition_type(&disk, index, fs_guid);
+        if (err == ERR_OK) {
+            printf("Partition %d type changed successfully.\n", index + 1);
+        } else if (err == ERR_INVALID_VALUE) {
+            printf("Error: partition %d does not exist or invalid GUID.\n", index + 1);
+        } else {
+            printf("Error: failed to change partition type (code %d).\n", err);
+        }
+    } else {
         printf("Error: Unknown partition table type.\n");
         err = ERR_INVALID_VALUE;
     }
@@ -590,21 +503,10 @@ ErrorCode process_set_type(CommandArgs *args) {
 }
 
 ErrorCode process_format(CommandArgs *args) {
-    // Проверяем обязательные аргументы
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_type) {
-        printf("Error: missing -fs= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+    CHECK_ARG(args->has_type, "fs");
 
-    // Пока поддерживаем только FAT32
     if (strcasecmp(args->type_raw, "fat32") != 0) {
         printf("Error: Unsupported filesystem type '%s'. Currently only FAT32 is supported.\n", args->type_raw);
         return ERR_INVALID_VALUE;
@@ -616,10 +518,8 @@ ErrorCode process_format(CommandArgs *args) {
     ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, &size_sectors);
     if (err != ERR_OK)
         return err;
-
-    // Определяем номер диска (для FAT32 BPB). Пока всегда 0x80 (жёсткий диск)
+	// Определяем номер диска (для FAT32 BPB). Пока всегда 0x80 (жёсткий диск)
     uint8_t drive_number = 0x80;
-
     err = fat32_format(&disk, start_lba, size_sectors, drive_number);
     if (err == ERR_OK) {
         printf("Partition %d formatted as FAT32 successfully.\n", atoi(args->part_index_raw));
@@ -632,23 +532,15 @@ ErrorCode process_format(CommandArgs *args) {
 }
 
 ErrorCode process_write_mbr_loader(CommandArgs *args) {
-	if (!args->has_disk_path) {
-		printf("Error: missing -disk= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
-	if (!args->has_file) {
-		printf("Error: missing -file= parameter.\n");
-		return ERR_MISSING_ARGUMENT;
-	}
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_file, "file");
 
-    // Открываем файл с кодом
     FILE *f = fopen(args->file_raw, "rb");
     if (!f) {
         printf("Error: cannot open file '%s'\n", args->file_raw);
         return ERR_GENERIC;
     }
 
-    // Определяем размер файла
     fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
     rewind(f);
@@ -667,17 +559,16 @@ ErrorCode process_write_mbr_loader(CommandArgs *args) {
         return ERR_GENERIC;
     }
 
-    // Открываем диск и определяем тип таблицы
     Disk disk;
     PartitionTableType table_type;
     ErrorCode err = cmd_disk_open_and_detect(args->disk_path, &disk, &table_type);
-	if (err != ERR_OK) {
-		if (err == ERR_DISK_OPEN)
-			printf("Error: cannot open disk file '%s'\n", args->disk_path);
-		else
-			printf("Error: failed to open disk (code %d)\n", err);
-		return err;
-	}
+    if (err != ERR_OK) {
+        if (err == ERR_DISK_OPEN)
+            printf("Error: cannot open disk file '%s'\n", args->disk_path);
+        else
+            printf("Error: failed to open disk (code %d)\n", err);
+        return err;
+    }
 
     if (table_type != PT_MBR) {
         printf("Error: Writing MBR code is only supported for MBR-partitioned disks.\n");
@@ -701,24 +592,34 @@ ErrorCode process_write_bpb_loader(CommandArgs *args) {
     printf("\n>>> STUB: process_write_bpb_loader\n");
     print_args_summary(args);
 
-	if (!args->has_disk_path || !args->has_part_index || !args->has_file)
-		return ERR_MISSING_ARGUMENT;
+    if (!args->has_disk_path || !args->has_part_index || !args->has_file)
+        return ERR_MISSING_ARGUMENT;
 
-    printf("ACTION: Would write BPB loader from file '%s' to partition at index %s on disk '%s'\n", 
+    printf("ACTION: Would write BPB loader from file '%s' to partition at index %s on disk '%s'\n",
            args->file_raw, args->part_index_raw, args->disk_path);
     return ERR_OK;
 }
 
-// ---------- Функции для файловых операций ----------
+// ---------- File system operations ----------
+ErrorCode process_open(CommandArgs *args) {
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+
+    Disk disk;
+    PartitionTableType table_type;
+    uint64_t start_lba;
+    ErrorCode err = open_and_get_partition(args, &disk, &table_type, &start_lba, NULL);
+    if (err != ERR_OK)
+        return err;
+
+    run_shell(&disk, start_lba);
+    disk_close(&disk);
+    return ERR_OK;
+}
+
 ErrorCode process_ls(CommandArgs *args) {
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
 
     const char *path = args->has_path_raw ? args->path_raw : "/";
 
@@ -735,22 +636,10 @@ ErrorCode process_ls(CommandArgs *args) {
 }
 
 ErrorCode process_copy(CommandArgs *args) {
-    if (!args->has_src) {
-        printf("Error: missing -src= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_path_raw) {
-        printf("Error: missing -path= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_src, "src");
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+    CHECK_ARG(args->has_path_raw, "path");
 
     Disk disk;
     PartitionTableType table_type;
@@ -765,18 +654,9 @@ ErrorCode process_copy(CommandArgs *args) {
 }
 
 ErrorCode process_rm(CommandArgs *args) {
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_path_raw) {
-        printf("Error: missing -path= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+    CHECK_ARG(args->has_path_raw, "path");
 
     Disk disk;
     PartitionTableType table_type;
@@ -791,18 +671,9 @@ ErrorCode process_rm(CommandArgs *args) {
 }
 
 ErrorCode process_mkdir(CommandArgs *args) {
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_path_raw) {
-        printf("Error: missing -path= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+    CHECK_ARG(args->has_path_raw, "path");
 
     Disk disk;
     PartitionTableType table_type;
@@ -817,18 +688,9 @@ ErrorCode process_mkdir(CommandArgs *args) {
 }
 
 ErrorCode process_rmdir(CommandArgs *args) {
-    if (!args->has_disk_path) {
-        printf("Error: missing -disk= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_part_index) {
-        printf("Error: missing -index= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->has_path_raw) {
-        printf("Error: missing -path= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
+    CHECK_ARG(args->has_disk_path, "disk");
+    CHECK_ARG(args->has_part_index, "index");
+    CHECK_ARG(args->has_path_raw, "path");
 
     Disk disk;
     PartitionTableType table_type;
@@ -842,12 +704,12 @@ ErrorCode process_rmdir(CommandArgs *args) {
     return err;
 }
 
-// ---------- Заглушки для карты специальных файлов ----------
+// ---------- Map file ----------
 ErrorCode process_map_file(CommandArgs *args) {
     printf("\n>>> STUB: process_map_file\n");
     print_args_summary(args);
 
-	if (!args->has_disk_path || !args->has_part_index || !args->has_op)
+    if (!args->has_disk_path || !args->has_part_index || !args->has_op)
         return ERR_MISSING_ARGUMENT;
 
     if (strcmp(args->op_raw, "delete") == 0 && !args->has_name) {
@@ -856,10 +718,10 @@ ErrorCode process_map_file(CommandArgs *args) {
     }
 
     if (strcmp(args->op_raw, "list") == 0) {
-        printf("ACTION: Would list map file entries on partition %s of disk '%s'\n", 
+        printf("ACTION: Would list map file entries on partition %s of disk '%s'\n",
                args->part_index_raw, args->disk_path);
     } else if (strcmp(args->op_raw, "delete") == 0) {
-        printf("ACTION: Would delete map file entry '%s' on partition %s of disk '%s'\n", 
+        printf("ACTION: Would delete map file entry '%s' on partition %s of disk '%s'\n",
                args->name_raw, args->part_index_raw, args->disk_path);
     } else {
         printf("ERROR: Unsupported operation '%s' for map_file\n", args->op_raw);
@@ -873,10 +735,10 @@ ErrorCode process_copy_special(CommandArgs *args) {
     printf("\n>>> STUB: process_copy_special\n");
     print_args_summary(args);
 
-	if (!args->has_disk_path || !args->has_part_index || !args->has_src || !args->has_path_raw)
+    if (!args->has_disk_path || !args->has_part_index || !args->has_src || !args->has_path_raw)
         return ERR_MISSING_ARGUMENT;
 
-    printf("ACTION: Would copy host file '%s' to '%s' on partition %s of disk '%s' with map file entry\n", 
+    printf("ACTION: Would copy host file '%s' to '%s' on partition %s of disk '%s' with map file entry\n",
            args->src_raw, args->path_raw, args->part_index_raw, args->disk_path);
     return ERR_OK;
 }

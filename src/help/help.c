@@ -22,19 +22,19 @@ void print_partition_help(void) {
     printf("  --partition -disk=DISK_PATH -index=IDX -op=delete                         Delete partition\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=active|inactive                Set partition active/bootable (MBR only)\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=set_type -fs=FSTYPE            Change partition type\n");
-    printf("                     FSTYPE: hex code or name (linux, swap, efi, ...).\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=format -fs=FSTYPE              Format partition (stub)\n");
     printf("  --partition -disk=DISK_PATH -op=write_mbr -file=FILE                      Write MBR code (first 446 bytes)\n");
     printf("  --partition -disk=DISK_PATH -index=IDX -op=write_bpb -file=FILE           Write BPB code (stub)\n");
 }
 
 void print_fs_help(void) {
-    printf("File system operations (all stubs):\n");
+    printf("File system operations:\n");
     printf("  --copy -src=HOST_FILE -disk=DISK_PATH -index=IDX -path=FS_PATH            Copy file from OS to disk\n");
     printf("  --ls -disk=DISK_PATH -index=IDX -path=FS_PATH                             List files/directories\n");
     printf("  --mkdir -disk=DISK_PATH -index=IDX -path=FS_PATH                          Create directory\n");
     printf("  --rmdir -disk=DISK_PATH -index=IDX -path=FS_PATH                          Remove directory\n");
     printf("  --rm -disk=DISK_PATH -index=IDX -path=FS_PATH                             Remove file\n");
+    printf("  --open -disk=DISK_PATH -index=IDX                                         Enter interactive shell\n");
 }
 
 void print_map_help(void) {
@@ -61,6 +61,20 @@ void print_general_help(void) {
     print_map_help();
     printf("\n");
     print_global_help();
+}
+
+void print_shell_help(void) {
+    printf("Available commands:\n");
+    printf("  ls [path]               - list directory contents\n");
+    printf("  cd [path]                - change current directory (default: root)\n");
+    printf("  pwd                      - print current directory\n");
+    printf("  mkdir <path>              - create directory (use quotes for names with spaces)\n");
+    printf("  rmdir <path>              - remove empty directory (use quotes for names with spaces)\n");
+    printf("  rm <path>                 - delete file (use quotes for names with spaces)\n");
+    printf("  copy <host-file> <dest>   - copy file from host to image (use quotes for paths with spaces)\n");
+    printf("  reserve                    - allocate a free cluster and store its number in BPB reserved area\n");
+    printf("  exit                      - exit shell\n");
+    printf("  help, ?                   - show this help\n");
 }
 
 void print_version(void) {
