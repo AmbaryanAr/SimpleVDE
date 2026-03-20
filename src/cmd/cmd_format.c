@@ -1,13 +1,13 @@
 #include "utils.h"
 #include "partition.h"
 #include "cmd_format.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
 
 ErrorCode cmd_format(CMDArgs *args) {
-    // Проверяем поддержку ФС
     if (strcmp(args->fs, "fat32") != 0) {
         fprintf(stderr, "Error: unsupported filesystem type '%s'. Only 'fat32' is supported.\n", args->fs);
         return ERR_NOT_SUPPORTED;
@@ -38,15 +38,15 @@ ErrorCode cmd_format(CMDArgs *args) {
     uint64_t start_lba, size_sectors;
     err = partition_get_info(&disk, part_index, &start_lba, &size_sectors);
     if (err != ERR_OK) {
-        if (err == ERR_NOT_FOUND)
+        if (err == ERR_NOT_FOUND) {
             fprintf(stderr, "Partition %d does not exist.\n", part_index + 1);
-        else
+        } else {
             fprintf(stderr, "Failed to get partition info (error %d).\n", err);
+        }
         disk_close(&disk);
         return err;
     }
 
-    // Форматируем раздел
     err = fat32_format(&disk, start_lba, size_sectors, 0x80, 0, NULL);
     if (err != ERR_OK) {
         fprintf(stderr, "Failed to format partition %d as FAT32 (error %d).\n", part_index + 1, err);
@@ -54,11 +54,9 @@ ErrorCode cmd_format(CMDArgs *args) {
         return err;
     }
 
-    // Обновляем тип раздела в таблице разделов
     err = partition_set_type(&disk, part_index, "fat32");
     if (err != ERR_OK) {
         fprintf(stderr, "Warning: partition formatted but failed to update partition type (error %d).\n", err);
-        // Не считаем это критической ошибкой, но сообщаем
     } else {
         printf("Partition type set to FAT32.\n");
     }

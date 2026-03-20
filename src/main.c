@@ -1,9 +1,3 @@
-#include <time.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdbool.h>
-
 #include "cmd.h"
 #include "help.h"
 #include "utils.h"
@@ -14,24 +8,33 @@
 #include "cmd_format.h"
 #include "error_codes.h"
 
-// Макрос для проверки одного обязательного параметра
+#include <time.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
 #define CHECK_ARG(field, name) \
     do { \
         if (!(field)) { \
             fprintf(stderr, "Error: missing -%s= parameter.\n", name); \
             return 1; \
         } \
-    } while(0)
+    } while (0)
 
 static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
     srand((unsigned)time(NULL));
-	memset(args, 0, sizeof(CMDArgs));
+    memset(args, 0, sizeof(CMDArgs));
 
     for (int i = 1; i < argc; ++i) {
         char *arg = argv[i];
 
         if (arg[0] != '-') {
-            fprintf(stderr, "Warning: unexpected argument '%s' ignored.\n", arg);
+            if (args->category && args->command == NULL) {
+                args->command = arg;
+            } else {
+                fprintf(stderr, "Warning: unexpected argument '%s' ignored.\n", arg);
+            }
             continue;
         }
 
@@ -42,36 +45,36 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
             while (*key == '-') key++;
             char *value = eq + 1;
 
-            if (strcmp(key, "file") == 0)
+            if (strcmp(key, "file") == 0) {
                 args->file = value;
-            else if (strcmp(key, "name") == 0)
+            } else if (strcmp(key, "name") == 0) {
                 args->name = value;
-            else if (strcmp(key, "part") == 0)
+            } else if (strcmp(key, "part") == 0) {
                 args->part = value;
-            else if (strcmp(key, "size") == 0)
+            } else if (strcmp(key, "size") == 0) {
                 args->size = value;
-            else if (strcmp(key, "type") == 0)
+            } else if (strcmp(key, "type") == 0) {
                 args->type = value;
-            else if (strcmp(key, "table") == 0)
+            } else if (strcmp(key, "table") == 0) {
                 args->table = value;
-            else if (strcmp(key, "offset") == 0)
+            } else if (strcmp(key, "offset") == 0) {
                 args->offset = value;
-            else if (strcmp(key, "count") == 0)
+            } else if (strcmp(key, "count") == 0) {
                 args->count = value;
-            else if (strcmp(key, "src") == 0)
+            } else if (strcmp(key, "src") == 0) {
                 args->src = value;
-            else if (strcmp(key, "dest") == 0)
+            } else if (strcmp(key, "dest") == 0) {
                 args->dest = value;
-            else if (strcmp(key, "path") == 0)
+            } else if (strcmp(key, "path") == 0) {
                 args->path = value;
-            else if (strcmp(key, "fs") == 0)
+            } else if (strcmp(key, "fs") == 0) {
                 args->fs = value;
-            else
+            } else {
                 fprintf(stderr, "Warning: unknown parameter -%s ignored.\n", key);
+            }
 
             *eq = '=';
         } else {
-            // Команда вида --category или --category-command
             if (arg[0] != '-' || arg[1] != '-') {
                 fprintf(stderr, "Warning: unexpected argument '%s' ignored.\n", arg);
                 continue;
@@ -79,12 +82,10 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
 
             char *dash = strchr(arg + 2, '-');
             if (dash) {
-                // --category-command
                 *dash = '\0';
                 args->category = arg;
                 args->command = dash + 1;
             } else {
-                // --category (без команды)
                 args->category = arg;
                 args->command = NULL;
             }
@@ -105,7 +106,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
-        print_general_help();
+        print_global_help();
         return 0;
     }
     if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
@@ -117,8 +118,19 @@ int main(int argc, char *argv[]) {
     parse_arguments(argc, argv, &args);
     ErrorCode err = ERR_UNKNOWN;
 
-    // Определяем категорию по префиксу (без "--")
-    const char *cat = args.category + 2; // пропускаем "--"
+    const char *cat = args.category + 2;
+
+    if (args.command == NULL) {
+        if (strcmp(cat, "format") != 0 && strcmp(cat, "shell") != 0) {
+            print_category_help(cat);
+            return 0;
+        }
+    }
+
+    if (args.command && (strcmp(args.command, "?") == 0 || strcmp(args.command, "help") == 0)) {
+        print_category_help(cat);
+        return 0;
+    }
 
     if (strcmp(cat, "disk") == 0) {
         if (strcmp(args.command, "create") == 0) {
@@ -143,8 +155,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: unknown disk command '%s'.\n", args.command);
             return 1;
         }
-    }
-    else if (strcmp(cat, "part") == 0) {
+    } else if (strcmp(cat, "part") == 0) {
         if (strcmp(args.command, "create") == 0) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");
@@ -170,87 +181,81 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: unknown partition command '%s'.\n", args.command);
             return 1;
         }
-    }
-    else if (strcmp(cat, "format") == 0) {
+    } else if (strcmp(cat, "format") == 0) {
         CHECK_ARG(args.file, "file");
         CHECK_ARG(args.part, "part");
         CHECK_ARG(args.fs, "fs");
         err = cmd_format(&args);
-    }
-else if (strcmp(cat, "fs") == 0) {
-    if (strcmp(args.command, "ls") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        // path опционален
-        err = cmd_fs_ls(&args);
-    } else if (strcmp(args.command, "copy") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        CHECK_ARG(args.src, "src");
-        CHECK_ARG(args.dest, "dest");
-        err = cmd_fs_copy(&args);
-    } else if (strcmp(args.command, "mkdir") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        CHECK_ARG(args.path, "path");
-        err = cmd_fs_mkdir(&args);
-    } else if (strcmp(args.command, "rm") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        CHECK_ARG(args.path, "path");
-        err = cmd_fs_rm(&args);
-    } else if (strcmp(args.command, "rmdir") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        CHECK_ARG(args.path, "path");
-        err = cmd_fs_rmdir(&args);
-    } else if (strcmp(args.command, "tree") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        // path опционален
-        err = cmd_fs_tree(&args);
-    } else if (strcmp(args.command, "reserve-init") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        err = cmd_fs_reserve_init(&args);
-    } else if (strcmp(args.command, "reserve-ls") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        err = cmd_fs_reserve_ls(&args);
-    } else if (strcmp(args.command, "reserve-add") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        CHECK_ARG(args.path, "path");
-        err = cmd_fs_reserve_add(&args);
-    } else if (strcmp(args.command, "reserve-rm") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        CHECK_ARG(args.name, "name");
-        err = cmd_fs_reserve_rm(&args);
-    } else if (strcmp(args.command, "reserve-clear") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        err = cmd_fs_reserve_clear(&args);
-    } else if (strcmp(args.command, "reserve-dump") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        err = cmd_fs_reserve_dump(&args);
-    } else if (strcmp(args.command, "reserve-info") == 0) {
-        CHECK_ARG(args.file, "file");
-        CHECK_ARG(args.part, "part");
-        err = cmd_fs_reserve_info(&args);
-    } else {
-        fprintf(stderr, "Error: unknown fs command '%s'.\n", args.command);
-        return 1;
-    }
-}    
-    else if (strcmp(cat, "shell") == 0) {
+    } else if (strcmp(cat, "fs") == 0) {
+        if (strcmp(args.command, "ls") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_ls(&args);
+        } else if (strcmp(args.command, "copy") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.src, "src");
+            CHECK_ARG(args.dest, "dest");
+            err = cmd_fs_copy(&args);
+        } else if (strcmp(args.command, "mkdir") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.path, "path");
+            err = cmd_fs_mkdir(&args);
+        } else if (strcmp(args.command, "rm") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.path, "path");
+            err = cmd_fs_rm(&args);
+        } else if (strcmp(args.command, "rmdir") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.path, "path");
+            err = cmd_fs_rmdir(&args);
+        } else if (strcmp(args.command, "tree") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_tree(&args);
+        } else if (strcmp(args.command, "reserve-init") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_reserve_init(&args);
+        } else if (strcmp(args.command, "reserve-ls") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_reserve_ls(&args);
+        } else if (strcmp(args.command, "reserve-add") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.path, "path");
+            err = cmd_fs_reserve_add(&args);
+        } else if (strcmp(args.command, "reserve-rm") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.name, "name");
+            err = cmd_fs_reserve_rm(&args);
+        } else if (strcmp(args.command, "reserve-clear") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_reserve_clear(&args);
+        } else if (strcmp(args.command, "reserve-dump") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_reserve_dump(&args);
+        } else if (strcmp(args.command, "reserve-info") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_reserve_info(&args);
+        } else {
+            fprintf(stderr, "Error: unknown fs command '%s'.\n", args.command);
+            return 1;
+        }
+    } else if (strcmp(cat, "shell") == 0) {
         CHECK_ARG(args.file, "file");
         CHECK_ARG(args.part, "part");
         err = cmd_shell(&args);
         return 1;
-    }
-    else if (strcmp(cat, "mbr") == 0) {
+    } else if (strcmp(cat, "mbr") == 0) {
         if (strcmp(args.command, "write") == 0) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.src, "src");
@@ -269,8 +274,7 @@ else if (strcmp(cat, "fs") == 0) {
             fprintf(stderr, "Error: unknown bpb command '%s'.\n", args.command);
             return 1;
         }
-    }
-    else {
+    } else {
         fprintf(stderr, "Error: unknown command category '%s'.\n", args.category);
         fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
         return 1;

@@ -1,12 +1,13 @@
 #ifndef FAT32_H
 #define FAT32_H
 
-#include "disk.h"
-#include "utils.h"
-#include "error_codes.h"
 #include <time.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+#include "disk.h"
+#include "utils.h"
+#include "error_codes.h"
 
 // ==================== Атрибуты записей каталога ====================
 #define FAT32_ATTR_READ_ONLY    0x01
@@ -179,7 +180,7 @@ typedef struct {
     uint32_t         file_size;
 } fat32_entry_info_t;
 
-// ==================== Основные функции тома (fat32_core.c) ====================
+// ==================== Основные функции тома ====================
 ErrorCode fat32_format(Disk *disk, uint64_t start_lba, uint64_t total_sectors,
                        uint8_t drive_number, uint32_t volume_id, const char *volume_label);
 ErrorCode fat32_get_info(Disk *disk, uint64_t start_lba, Fat32Info *info);
@@ -190,7 +191,7 @@ ErrorCode fat32_write_cluster(Disk *disk, const Fat32Info *info, uint32_t cluste
 ErrorCode fat32_get_next_cluster(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t *next);
 ErrorCode fat32_set_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t value);
 
-// ==================== Функции для работы с каталогами (fat32_dir.c) ====================
+// ==================== Функции для работы с каталогами ====================
 ErrorCode fat32_dir_open(Disk *disk, const Fat32Info *info, uint32_t start_cluster, Fat32Directory *dir);
 void fat32_dir_close(Fat32Directory *dir);
 bool fat32_find_free_entries(const Fat32Directory *dir, uint8_t needed,
@@ -202,80 +203,31 @@ ErrorCode fat32_write_entries_to_dir(Disk *disk, const Fat32Info *info,
 ErrorCode fat32_init_new_dir(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t parent_cluster);
 ErrorCode fat32_create_dir(Disk *disk, uint64_t start_lba, const char *path);
 
-// ==================== Функции чтения/поиска каталогов (fat32_ls.c) ====================
+// ==================== Функции чтения/поиска каталогов ====================
 ErrorCode fat32_read_dir(Disk *disk, const Fat32Info *info, uint32_t start_cluster,
                          uint8_t **buffer, uint32_t *entries_count);
 ErrorCode fat32_find_dir(Disk *disk, const Fat32Info *info, const char *path, uint32_t *dir_cluster);
 ErrorCode fat32_list_dir(Disk *disk, uint64_t start_lba, const char *path);
 
-// ==================== Функции подготовки записей (fat32_entry.c) ====================
+// ==================== Функции подготовки записей ====================
 Fat32ErrorCode fat32_prepare_entry(const char *utf8_name, uint8_t attr,
                                    const uint8_t *dir_buffer, uint32_t entry_count,
                                    fat32_entry_info_t *info);
 void fat32_free_entry_info(fat32_entry_info_t *info);
 void fat32_set_current_time(fat32_entry_info_t *info);
 
-
+// ==================== Функции для работы с файлами ====================
 ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path);
 ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path, const char *dest_path);
 ErrorCode fat32_remove_dir(Disk *disk, uint64_t start_lba, const char *path);
 
-// ==================== Функции для работы с реестром (reserve) ====================
-/**
- * @brief Инициализирует реестр: выделяет кластер, помечает его в FAT, сохраняет номер в BPB.
- * @param disk Открытый диск.
- * @param start_lba Начало раздела.
- * @return ErrorCode.
- */
+// ==================== Функции для работы с реестром ====================
 ErrorCode fat32_reserve_init(Disk *disk, uint64_t start_lba);
-
-/**
- * @brief Добавляет запись о файле в реестр.
- * @param disk Открытый диск.
- * @param start_lba Начало раздела.
- * @param path Путь к файлу внутри образа (абсолютный).
- * @return ErrorCode.
- */
 ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path);
-
-/**
- * @brief Выводит список записей из реестра.
- * @param disk Открытый диск.
- * @param start_lba Начало раздела.
- * @return ErrorCode.
- */
 ErrorCode fat32_reserve_list(Disk *disk, uint64_t start_lba);
-
-/**
- * @brief Удаляет запись из реестра по имени.
- * @param disk Открытый диск.
- * @param start_lba Начало раздела.
- * @param name Имя файла (как сохранено в реестре).
- * @return ErrorCode.
- */
 ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name);
-
-/**
- * @brief Очищает весь реестр (обнуляет кластер).
- * @param disk Открытый диск.
- * @param start_lba Начало раздела.
- * @return ErrorCode.
- */
 ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba);
-
-/**
- * @brief Выводит hex-дамп кластера реестра.
- * @param disk Открытый диск.
- * @param start_lba Начало раздела.
- * @return ErrorCode.
- */
 ErrorCode fat32_reserve_dump(Disk *disk, uint64_t start_lba);
-
-/**
- * @brief Выводит информацию о реестре: размер, занято, свободно.
- * @param disk Открытый диск.
- * @param start_lba Начало раздела.
- * @return ErrorCode.
- */
 ErrorCode fat32_reserve_info(Disk *disk, uint64_t start_lba);
+
 #endif

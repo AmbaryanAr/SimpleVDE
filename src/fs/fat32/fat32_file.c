@@ -1,91 +1,9 @@
 #include "fat32.h"
+#include "fat32_util.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
-
-static int strcasecmp_ascii(const char *a, const char *b) {
-    while (*a && *b) {
-        char ca = tolower((unsigned char)*a);
-        char cb = tolower((unsigned char)*b);
-        if (ca != cb) return (int)(ca - cb);
-        a++;
-        b++;
-    }
-    return (int)((unsigned char)*a - (unsigned char)*b);
-}
-
-static void sfn_to_display_name(const uint8_t sfn[11], char *out, size_t out_size) {
-    if (out_size < 13) return;
-    int pos = 0;
-    for (int i = 0; i < 8 && sfn[i] != ' '; i++) {
-        out[pos++] = (char)sfn[i];
-    }
-    if (sfn[8] != ' ') {
-        out[pos++] = '.';
-        for (int i = 0; i < 3 && sfn[8 + i] != ' '; i++) {
-            out[pos++] = (char)sfn[8 + i];
-        }
-    }
-    out[pos] = '\0';
-}
-
-/**
- * Извлекает длинное имя из LFN-записей, предшествующих SFN-записи с индексом sfn_index.
- * Возвращает динамически выделенную строку в UTF-8 (только ASCII), или NULL, если LFN нет.
- * Вызывающий должен освободить память free().
- */
-static char* extract_lfn_name(const uint8_t *dir_buffer, uint32_t sfn_index) {
-    // Ищем последнюю LFN перед SFN (ту, у которой order имеет бит 0x40)
-    uint32_t last_lfn = sfn_index;
-    while (last_lfn > 0) {
-        const uint8_t *e = dir_buffer + (last_lfn - 1) * 32;
-        if (e[11] != FAT32_ATTR_LFN) break;
-        if (e[0] & 0x40) {
-            // Это последняя LFN в наборе (первая при записи)
-            last_lfn--; // теперь last_lfn указывает на эту запись
-            break;
-        }
-        last_lfn--;
-    }
-    if (last_lfn == sfn_index) return NULL; // нет LFN
-
-    // Теперь last_lfn - индекс последней LFN (той, что ближе к SFN)
-    // Нам нужно собрать все LFN от last_lfn назад до первой, но проще собрать от last_lfn до sfn_index-1
-    uint32_t first_lfn = last_lfn;
-    // Идём назад до первой LFN (где order без бита 0x40)
-    while (first_lfn > 0) {
-        const uint8_t *e = dir_buffer + (first_lfn - 1) * 32;
-        if (e[11] != FAT32_ATTR_LFN) break;
-        first_lfn--;
-    }
-    // Теперь first_lfn - индекс первой LFN в наборе
-    // Собираем имена от first_lfn до sfn_index-1
-    uint16_t utf16[256];
-    size_t pos = 0;
-    for (uint32_t i = first_lfn; i < sfn_index; i++) {
-        const Fat32LongEntry *lfn = (const Fat32LongEntry*)(dir_buffer + i * 32);
-        if (lfn->attr != FAT32_ATTR_LFN) return NULL;
-        for (int j = 0; j < 5; j++) {
-            if (lfn->name1[j] != 0xFFFF) utf16[pos++] = lfn->name1[j];
-        }
-        for (int j = 0; j < 6; j++) {
-            if (lfn->name2[j] != 0xFFFF) utf16[pos++] = lfn->name2[j];
-        }
-        for (int j = 0; j < 2; j++) {
-            if (lfn->name3[j] != 0xFFFF) utf16[pos++] = lfn->name3[j];
-        }
-    }
-
-    char *name = (char*)malloc(pos + 1);
-    if (!name) return NULL;
-    for (size_t i = 0; i < pos; i++) {
-        name[i] = (char)(utf16[i] & 0x7F);
-    }
-    name[pos] = '\0';
-    return name;
-}
-
 
 // Вспомогательная функция для поиска индекса записи в открытом каталоге по имени
 static int find_entry_by_name(Disk *disk, const Fat32Info *info, Fat32Directory *dir,
@@ -141,7 +59,6 @@ static ErrorCode mark_entry_deleted(Disk *disk, const Fat32Info *info, Fat32Dire
     if (cluster_idx >= dir->cluster_count) return ERR_INVALID_ARGUMENT;
 
     uint32_t entries_per_cluster = (info->sectors_per_cluster * info->bytes_per_sector) / 32;
-    uint8_t *cluster_data = dir->clusters[cluster_idx].data;
     uint32_t global_entry = 0;
     // Вычислим глобальный индекс записи (для навигации по LFN назад)
     for (uint32_t ci = 0; ci < cluster_idx; ci++) {
@@ -221,7 +138,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
     }
 
     // 4. Проверяем, нет ли уже файла с таким именем (просканируем родительский каталог)
-    // Для этого нужно получить буфер всех записей родительского каталога
     uint8_t *parent_buffer = NULL;
     uint32_t parent_entries = 0;
     err = fat32_read_dir(disk, &info, parent_cluster, &parent_buffer, &parent_entries);
@@ -231,7 +147,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         return err;
     }
 
-    // Сканируем записи (пропуская LFN) и ищем совпадение имени
     bool already_exists = false;
     for (uint32_t i = 0; i < parent_entries; i++) {
         const uint8_t *entry = parent_buffer + i * 32;
@@ -239,9 +154,8 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         if (entry[0] == 0xE5) continue;
         if (entry[11] == FAT32_ATTR_LFN) continue;
 
-        // Получаем длинное имя, если есть
-        char *long_name = extract_lfn_name(parent_buffer, i); // эту функцию надо сделать доступной
-        const char *cmp_name = long_name ? long_name : (const char*)entry; // но для SFN нужно преобразование
+        char *long_name = extract_lfn_name(parent_buffer, i);
+        const char *cmp_name = long_name ? long_name : (const char*)entry;
         char sfn_name[13];
         if (!long_name) {
             sfn_to_display_name(entry, sfn_name, sizeof(sfn_name));
@@ -268,7 +182,7 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
     if (!host_file) {
         fat32_dir_close(&parent_dir);
         free(dest_copy);
-        return ERR_DISK_OPEN; // можно вернуть более подходящую ошибку
+        return ERR_DISK_OPEN;
     }
 
     fseek(host_file, 0, SEEK_END);
@@ -280,7 +194,7 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         free(dest_copy);
         return ERR_DISK_READ;
     }
-    uint32_t file_size = (uint32_t)host_size; // FAT32 ограничен 4 ГБ
+    uint32_t file_size = (uint32_t)host_size;
 
     // 6. Рассчитываем необходимое количество кластеров
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
@@ -300,7 +214,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
     for (uint32_t i = 0; i < needed_clusters; i++) {
         uint32_t new_cluster = fat32_alloc_cluster(disk, &info);
         if (new_cluster == 0) {
-            // Не хватило места – освобождаем уже выделенные кластеры
             if (first_cluster != 0) {
                 fat32_free_cluster_chain(disk, &info, first_cluster);
             }
@@ -314,7 +227,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         if (i == 0) {
             first_cluster = new_cluster;
         } else {
-            // Связываем предыдущий кластер с новым
             err = fat32_set_fat_entry(disk, &info, prev_cluster, new_cluster);
             if (err != ERR_OK) {
                 fat32_free_cluster_chain(disk, &info, first_cluster);
@@ -327,7 +239,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         }
         prev_cluster = new_cluster;
     }
-    // Последний кластер помечаем как EOC
     if (needed_clusters > 0) {
         err = fat32_set_fat_entry(disk, &info, prev_cluster, FAT32_CLUSTER_EOC);
         if (err != ERR_OK) {
@@ -347,7 +258,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         size_t to_read = (remaining < cluster_size) ? remaining : cluster_size;
         size_t read = fread(cluster_buf, 1, to_read, host_file);
         if (read != to_read) {
-            // Ошибка чтения хоста – освобождаем кластеры и выходим
             fat32_free_cluster_chain(disk, &info, first_cluster);
             free(cluster_buf);
             fclose(host_file);
@@ -355,7 +265,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
             free(dest_copy);
             return ERR_DISK_READ;
         }
-        // Если остаток меньше кластера, остаток буфера можно забить нулями (необязательно)
         err = fat32_write_cluster(disk, &info, cluster, cluster_buf);
         if (err != ERR_OK) {
             fat32_free_cluster_chain(disk, &info, first_cluster);
@@ -366,7 +275,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
             return err;
         }
         remaining -= (uint32_t)to_read;
-        // Получаем следующий кластер
         uint32_t next;
         err = fat32_get_next_cluster(disk, &info, cluster, &next);
         if (err != ERR_OK) {
@@ -383,7 +291,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
     fclose(host_file);
 
     // 9. Подготавливаем запись для нового файла
-    // Сначала нам нужен буфер всех записей родительского каталога для генерации SFN
     uint8_t *parent_dir_buffer = NULL;
     uint32_t parent_dir_entries = 0;
     err = fat32_read_dir(disk, &info, parent_cluster, &parent_dir_buffer, &parent_dir_entries);
@@ -403,7 +310,7 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         fat32_free_cluster_chain(disk, &info, first_cluster);
         fat32_dir_close(&parent_dir);
         free(dest_copy);
-        return (ErrorCode)ferr; // упрощённо, но лучше преобразовывать
+        return (ErrorCode)ferr;
     }
 
     // 10. Заполняем первый кластер, размер и текущее время
@@ -416,7 +323,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
     bool found = fat32_find_free_entries(&parent_dir, entry_info.total_entries,
                                           &cluster_idx, &entry_off);
     if (!found) {
-        // Расширяем родительский каталог
         err = fat32_append_cluster_to_dir(disk, &info, &parent_dir);
         if (err != ERR_OK) {
             fat32_free_cluster_chain(disk, &info, first_cluster);
@@ -425,7 +331,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
             free(dest_copy);
             return err;
         }
-        // После расширения ищем снова
         found = fat32_find_free_entries(&parent_dir, entry_info.total_entries,
                                          &cluster_idx, &entry_off);
         if (!found) {
@@ -448,7 +353,6 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
         return err;
     }
 
-    // 13. Очистка
     fat32_free_entry_info(&entry_info);
     fat32_dir_close(&parent_dir);
     free(dest_copy);
@@ -462,7 +366,6 @@ ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path) {
     ErrorCode err = fat32_get_info(disk, start_lba, &info);
     if (err != ERR_OK) return err;
 
-    // Разбираем путь на родительский каталог и имя файла
     char *path_copy = my_strdup(path);
     char *last_slash = strrchr(path_copy, '/');
     if (!last_slash) {
@@ -476,7 +379,6 @@ ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path) {
         parent_path = "/";
     }
 
-    // Находим кластер родительского каталога
     uint32_t parent_cluster;
     err = fat32_find_dir(disk, &info, parent_path, &parent_cluster);
     if (err != ERR_OK) {
@@ -484,7 +386,6 @@ ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path) {
         return err;
     }
 
-    // Открываем родительский каталог
     Fat32Directory parent_dir;
     err = fat32_dir_open(disk, &info, parent_cluster, &parent_dir);
     if (err != ERR_OK) {
@@ -492,7 +393,6 @@ ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path) {
         return err;
     }
 
-    // Ищем запись с именем file_name
     uint32_t cluster_idx, entry_idx;
     if (find_entry_by_name(disk, &info, &parent_dir, file_name, &cluster_idx, &entry_idx) != 0) {
         fat32_dir_close(&parent_dir);
@@ -500,16 +400,14 @@ ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path) {
         return ERR_NOT_FOUND;
     }
 
-    // Проверяем, что это не каталог
     uint8_t *entry = parent_dir.clusters[cluster_idx].data + entry_idx * 32;
     Fat32ShortEntry *se = (Fat32ShortEntry*)entry;
     if (se->attr & FAT32_ATTR_DIRECTORY) {
         fat32_dir_close(&parent_dir);
         free(path_copy);
-        return ERR_INVALID_ARGUMENT; // или специальный код "is a directory"
+        return ERR_INVALID_ARGUMENT;
     }
 
-    // Освобождаем цепочку кластеров файла (если они есть)
     uint32_t first_cluster = ((uint32_t)se->first_cluster_hi << 16) | se->first_cluster_lo;
     if (first_cluster != 0) {
         err = fat32_free_cluster_chain(disk, &info, first_cluster);
@@ -520,7 +418,6 @@ ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path) {
         }
     }
 
-    // Помечаем запись как удалённую (и все связанные LFN)
     err = mark_entry_deleted(disk, &info, &parent_dir, cluster_idx, entry_idx);
     if (err != ERR_OK) {
         fat32_dir_close(&parent_dir);

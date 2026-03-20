@@ -6,6 +6,7 @@
 #include "fat32.h"
 #include "error_codes.h"
 
+/** Форматирует раздел в FAT32. */
 ErrorCode cmd_format(CMDArgs *args);
 
 #endif

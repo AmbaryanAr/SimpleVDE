@@ -1,30 +1,26 @@
 #include "disk.h"
-#include "utils.h"
 #include "shell.h"
 #include "fat32.h"
-#include "cmd_fs.h"
+#include "utils.h"
 #include "partition.h"
+#include "fat32_util.h"
+#include "cmd_common.h"
 #include "error_codes.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-#define MAX_ARGS 10
-#define MAX_PATH 260
-#define MAX_CMD_LINE 1024
-
-// Глобальное состояние shell
 static struct {
     Disk disk;
     uint64_t start_lba;
     Fat32Info info;
     char current_path[MAX_PATH];
     int is_open;
-    char part_str[16]; // для хранения номера раздела (на случай, если понадобится)
+    char part_str[16];
 } shell_state = { .is_open = 0 };
 
-// Прототипы статических функций
 static char* normalize_path(const char *path);
 static char* resolve_path(const char *input);
 static int parse_line(char *line, char **argv, int max_args);
@@ -40,86 +36,11 @@ static int cmd_reserve(int argc, char **argv);
 static int cmd_tree(int argc, char **argv);
 static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
                        const char *name, const char *prefix, int is_last);
-static char* extract_lfn_name(const uint8_t *dir_buffer, uint32_t sfn_index);
-static void sfn_to_display_name(const uint8_t sfn[11], char *out, size_t out_size);
-static int strcasecmp_ascii(const char *a, const char *b);
 
-// ==================== Вспомогательные функции ====================
-
-static int strcasecmp_ascii(const char *a, const char *b) {
-    while (*a && *b) {
-        char ca = tolower((unsigned char)*a);
-        char cb = tolower((unsigned char)*b);
-        if (ca != cb) return (int)(ca - cb);
-        a++;
-        b++;
-    }
-    return (int)((unsigned char)*a - (unsigned char)*b);
-}
-
-static void sfn_to_display_name(const uint8_t sfn[11], char *out, size_t out_size) {
-    if (out_size < 13) return;
-    int pos = 0;
-    for (int i = 0; i < 8 && sfn[i] != ' '; i++) {
-        out[pos++] = (char)sfn[i];
-    }
-    if (sfn[8] != ' ') {
-        out[pos++] = '.';
-        for (int i = 0; i < 3 && sfn[8 + i] != ' '; i++) {
-            out[pos++] = (char)sfn[8 + i];
-        }
-    }
-    out[pos] = '\0';
-}
-
-static char* extract_lfn_name(const uint8_t *dir_buffer, uint32_t sfn_index) {
-    uint32_t lfn_start = sfn_index;
-    while (lfn_start > 0) {
-        const uint8_t *e = dir_buffer + (lfn_start - 1) * 32;
-        if (e[11] != FAT32_ATTR_LFN) break;
-        if (e[0] & 0x40) {
-            lfn_start--;
-            break;
-        }
-        lfn_start--;
-    }
-    if (lfn_start == sfn_index) return NULL;
-
-    uint32_t first_lfn = lfn_start;
-    while (first_lfn > 0) {
-        const uint8_t *e = dir_buffer + (first_lfn - 1) * 32;
-        if (e[11] != FAT32_ATTR_LFN) break;
-        first_lfn--;
-    }
-
-    uint16_t utf16[256];
-    size_t pos = 0;
-    for (uint32_t i = first_lfn; i < sfn_index; i++) {
-        const Fat32LongEntry *lfn = (const Fat32LongEntry*)(dir_buffer + i * 32);
-        if (lfn->attr != FAT32_ATTR_LFN) return NULL;
-        for (int j = 0; j < 5; j++) {
-            if (lfn->name1[j] != 0xFFFF) utf16[pos++] = lfn->name1[j];
-        }
-        for (int j = 0; j < 6; j++) {
-            if (lfn->name2[j] != 0xFFFF) utf16[pos++] = lfn->name2[j];
-        }
-        for (int j = 0; j < 2; j++) {
-            if (lfn->name3[j] != 0xFFFF) utf16[pos++] = lfn->name3[j];
-        }
-    }
-
-    char *name = (char*)malloc(pos + 1);
-    if (!name) return NULL;
-    for (size_t i = 0; i < pos; i++) {
-        name[i] = (char)(utf16[i] & 0x7F);
-    }
-    name[pos] = '\0';
-    return name;
-}
-
-// Инициализация shell
 static ErrorCode shell_init(const char *file, const char *part) {
-    if (shell_state.is_open) return ERR_OK;
+    if (shell_state.is_open) {
+        return ERR_OK;
+    }
 
     ErrorCode err = disk_open(file, &shell_state.disk);
     if (err != ERR_OK) {
@@ -146,10 +67,11 @@ static ErrorCode shell_init(const char *file, const char *part) {
     err = partition_get_info(&shell_state.disk, part_index, &shell_state.start_lba, &size_sectors);
     if (err != ERR_OK) {
         disk_close(&shell_state.disk);
-        if (err == ERR_NOT_FOUND)
+        if (err == ERR_NOT_FOUND) {
             fprintf(stderr, "Error: partition %d does not exist.\n", part_index + 1);
-        else
+        } else {
             fprintf(stderr, "Error: cannot get partition info.\n");
+        }
         return err;
     }
 
@@ -175,22 +97,29 @@ static void shell_shutdown(void) {
 }
 
 static char* normalize_path(const char *path) {
-    if (!path || path[0] != '/') return NULL;
-
+    if (!path || path[0] != '/') {
+        return NULL;
+    }
     char *result = malloc(MAX_PATH);
-    if (!result) return NULL;
-
+    if (!result) {
+        return NULL;
+    }
     char *out = result;
     const char *in = path;
     *out++ = '/';
     in++;
 
     while (*in) {
-        while (*in == '/') in++;
-        if (*in == '\0') break;
-
+        while (*in == '/') {
+            in++;
+        }
+        if (*in == '\0') {
+            break;
+        }
         const char *start = in;
-        while (*in && *in != '/') in++;
+        while (*in && *in != '/') {
+            in++;
+        }
         size_t len = in - start;
 
         if (len == 1 && start[0] == '.') {
@@ -198,16 +127,22 @@ static char* normalize_path(const char *path) {
         } else if (len == 2 && start[0] == '.' && start[1] == '.') {
             if (out > result + 1) {
                 out--;
-                while (out > result && *(out - 1) != '/') out--;
+                while (out > result && *(out - 1) != '/') {
+                    out--;
+                }
             }
         } else {
-            if (*(out - 1) != '/') *out++ = '/';
+            if (*(out - 1) != '/') {
+                *out++ = '/';
+            }
             memcpy(out, start, len);
             out += len;
         }
     }
     *out = '\0';
-    if (out == result + 1 && result[0] == '/') result[1] = '\0';
+    if (out == result + 1 && result[0] == '/') {
+        result[1] = '\0';
+    }
     return result;
 }
 
@@ -217,9 +152,13 @@ static char* resolve_path(const char *input) {
     if (input[0] == '/') {
         full = my_strdup(input);
     } else {
-        char temp[MAX_PATH];
-        snprintf(temp, sizeof(temp), "%s/%s", shell_state.current_path, input);
+        // Динамическое выделение буфера нужного размера
+        size_t needed = strlen(shell_state.current_path) + strlen(input) + 2; // +1 для '/' и +1 для '\0'
+        char *temp = (char*)malloc(needed);
+        if (!temp) return NULL;
+        snprintf(temp, needed, "%s/%s", shell_state.current_path, input);
         full = my_strdup(temp);
+        free(temp);
     }
     if (!full) return NULL;
     char *norm = normalize_path(full);
@@ -231,14 +170,21 @@ static int parse_line(char *line, char **argv, int max_args) {
     int argc = 0;
     char *p = line;
     while (*p) {
-        while (isspace((unsigned char)*p)) p++;
-        if (*p == '\0') break;
-        if (argc >= max_args) return -1;
-
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        if (argc >= max_args) {
+            return -1;
+        }
         if (*p == '"') {
             p++;
             argv[argc] = p;
-            while (*p && *p != '"') p++;
+            while (*p && *p != '"') {
+                p++;
+            }
             if (*p == '"') {
                 *p++ = '\0';
             } else {
@@ -246,8 +192,12 @@ static int parse_line(char *line, char **argv, int max_args) {
             }
         } else {
             argv[argc] = p;
-            while (*p && !isspace((unsigned char)*p)) p++;
-            if (*p) *p++ = '\0';
+            while (*p && !isspace((unsigned char)*p)) {
+                p++;
+            }
+            if (*p) {
+                *p++ = '\0';
+            }
         }
         argc++;
     }
@@ -275,8 +225,6 @@ static void print_help(void) {
     printf("  exit                      - exit shell\n");
     printf("  help, ?                   - show this help\n");
 }
-
-// ==================== Обработчики команд ====================
 
 static int cmd_ls(int argc, char **argv) {
     const char *path = (argc > 1) ? argv[1] : ".";
@@ -314,7 +262,8 @@ static int cmd_cd(int argc, char **argv) {
 }
 
 static int cmd_pwd(int argc, char **argv) {
-    (void)argc; (void)argv;
+    (void)argc;
+    (void)argv;
     printf("%s\n", shell_state.current_path);
     return 0;
 }
@@ -491,9 +440,15 @@ static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
 
     for (uint32_t i = 0; i < entries; i++) {
         const uint8_t *entry = buffer + i * 32;
-        if (entry[0] == 0x00) break;
-        if (entry[0] == 0xE5) continue;
-        if (entry[11] == FAT32_ATTR_LFN) continue;
+        if (entry[0] == 0x00) {
+            break;
+        }
+        if (entry[0] == 0xE5) {
+            continue;
+        }
+        if (entry[11] == FAT32_ATTR_LFN) {
+            continue;
+        }
 
         Fat32ShortEntry *se = (Fat32ShortEntry*)entry;
         char display_name[256];
@@ -506,8 +461,9 @@ static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
             sfn_to_display_name(se->name, display_name, sizeof(display_name));
         }
 
-        if (strcmp(display_name, ".") == 0 || strcmp(display_name, "..") == 0)
+        if (strcmp(display_name, ".") == 0 || strcmp(display_name, "..") == 0) {
             continue;
+        }
 
         children = realloc(children, (child_count + 1) * sizeof(child_entry_t));
         children[child_count].name = strdup(display_name);
@@ -560,11 +516,11 @@ static int cmd_tree(int argc, char **argv) {
     return 0;
 }
 
-// ==================== Главная функция shell ====================
-
 ErrorCode cmd_shell(CMDArgs *args) {
     ErrorCode err = shell_init(args->file, args->part);
-    if (err != ERR_OK) return err;
+    if (err != ERR_OK) {
+        return err;
+    }
 
     printf("FAT32 Shell. Type 'help' for commands.\n");
 
@@ -572,10 +528,14 @@ ErrorCode cmd_shell(CMDArgs *args) {
     while (1) {
         printf("fs> ");
         fflush(stdout);
-        if (!fgets(line, sizeof(line), stdin)) break;
+        if (!fgets(line, sizeof(line), stdin)) {
+            break;
+        }
         line[strcspn(line, "\n")] = '\0';
 
-        if (line[0] == '\0') continue;
+        if (line[0] == '\0') {
+            continue;
+        }
 
         char *argv[MAX_ARGS];
         int argc = parse_line(line, argv, MAX_ARGS);
@@ -583,7 +543,9 @@ ErrorCode cmd_shell(CMDArgs *args) {
             fprintf(stderr, "Error: invalid command line (too many args or unmatched quotes).\n");
             continue;
         }
-        if (argc == 0) continue;
+        if (argc == 0) {
+            continue;
+        }
 
         const char *cmd = argv[0];
         if (strcmp(cmd, "exit") == 0) {

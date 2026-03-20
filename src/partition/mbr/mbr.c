@@ -1,11 +1,11 @@
 #include "mbr.h"
 #include "utils.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-// Вспомогательная функция для чтения MBR
 static ErrorCode mbr_read(Disk *disk, MbrSector *mbr) {
     return disk_read(disk, mbr, sizeof(MbrSector), 0);
 }
@@ -14,31 +14,31 @@ static ErrorCode mbr_write(Disk *disk, const MbrSector *mbr) {
     return disk_write(disk, mbr, sizeof(MbrSector), 0);
 }
 
-// Проверка, пуста ли запись раздела (тип 0)
 static bool is_partition_empty(const MbrPartitionEntry *entry) {
     return entry->partition_type == 0;
 }
 
-// Поиск следующего свободного LBA после всех существующих разделов
-static uint64_t find_next_free_lba(const MbrPartitionEntry *parts, uint64_t disk_sectors) {
-    uint64_t next = 2048; // традиционное смещение для первого раздела
+static uint64_t find_next_free_lba(const MbrPartitionEntry *parts) {
+    uint64_t next = 2048;
     for (int i = 0; i < 4; i++) {
         if (!is_partition_empty(&parts[i])) {
             uint64_t end = (uint64_t)parts[i].lba_start + parts[i].sector_count;
-            if (end > next) next = end;
+            if (end > next) {
+                next = end;
+            }
         }
     }
     return next;
 }
 
-// Инициализация MBR (стандартный код начальной загрузки, все разделы пусты)
 ErrorCode mbr_init(Disk *disk) {
-    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
+    if (!disk || !disk->is_open) {
+        return ERR_DISK_OPEN;
+    }
 
     MbrSector mbr;
     memset(&mbr, 0, sizeof(mbr));
 
-    // Небольшой загрузочный код, выводящий сообщение об ошибке
     const uint8_t boot_code[] = {
         0x33, 0xC0, 0x8E, 0xD0, 0xBC, 0x00, 0x7C, 0x8E, 0xD8, 0x8E, 0xC0,
         0xBE, 0x74, 0x7C, 0xB4, 0x0E, 0xAC, 0x3C, 0x00, 0x74, 0x04, 0xCD,
@@ -47,8 +47,9 @@ ErrorCode mbr_init(Disk *disk) {
         0x0D, 0x0A, 0
     };
     size_t boot_size = sizeof(boot_code);
-    if (boot_size > MBR_PARTITION_TABLE_OFFSET)
+    if (boot_size > MBR_PARTITION_TABLE_OFFSET) {
         boot_size = MBR_PARTITION_TABLE_OFFSET;
+    }
     memcpy(mbr.bootstrap, boot_code, boot_size);
 
     mbr.signature = MBR_SIGNATURE;
@@ -56,28 +57,35 @@ ErrorCode mbr_init(Disk *disk) {
 }
 
 ErrorCode mbr_create_partition(Disk *disk, int index, uint64_t size_sectors, uint8_t type) {
-    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
-    if (index < 0 || index >= 4) return ERR_INVALID_ARGUMENT;
-    if (size_sectors == 0) size_sectors = UINT64_MAX; // позже уточним
+    if (!disk || !disk->is_open) {
+        return ERR_DISK_OPEN;
+    }
+    if (index < 0 || index >= 4) {
+        return ERR_INVALID_ARGUMENT;
+    }
+    if (size_sectors == 0) {
+        size_sectors = UINT64_MAX;
+    }
 
     MbrSector mbr;
     ErrorCode err = mbr_read(disk, &mbr);
-    if (err != ERR_OK) return err;
+    if (err != ERR_OK) {
+        return err;
+    }
 
     if (!is_partition_empty(&mbr.partitions[index])) {
         return ERR_ALREADY_EXISTS;
     }
 
     uint64_t disk_sectors = disk->size / SECTOR_SIZE;
-    uint64_t next_lba = find_next_free_lba(mbr.partitions, disk_sectors);
+    uint64_t next_lba = find_next_free_lba(mbr.partitions);
 
     if (size_sectors == UINT64_MAX) {
-        // Занять всё свободное место до конца диска, но не более 32 бит
         size_sectors = disk_sectors - next_lba;
     }
 
     if (size_sectors > UINT32_MAX) {
-        size_sectors = UINT32_MAX; // MBR ограничена 32 битами
+        size_sectors = UINT32_MAX;
     }
 
     if (next_lba + size_sectors > disk_sectors) {
@@ -87,9 +95,8 @@ ErrorCode mbr_create_partition(Disk *disk, int index, uint64_t size_sectors, uin
     MbrPartitionEntry *entry = &mbr.partitions[index];
     memset(entry, 0, sizeof(*entry));
     entry->boot_flag = 0;
-    // Упрощённые CHS-адреса (LBA-совместимые)
     entry->start_head = 0;
-    entry->start_sector = 1;  // сектор 1, цилиндр 0
+    entry->start_sector = 1;
     entry->start_cylinder = 0;
     entry->partition_type = type;
     entry->end_head = 0xFE;
@@ -102,12 +109,18 @@ ErrorCode mbr_create_partition(Disk *disk, int index, uint64_t size_sectors, uin
 }
 
 ErrorCode mbr_delete_partition(Disk *disk, int index) {
-    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
-    if (index < 0 || index >= 4) return ERR_INVALID_ARGUMENT;
+    if (!disk || !disk->is_open) {
+        return ERR_DISK_OPEN;
+    }
+    if (index < 0 || index >= 4) {
+        return ERR_INVALID_ARGUMENT;
+    }
 
     MbrSector mbr;
     ErrorCode err = mbr_read(disk, &mbr);
-    if (err != ERR_OK) return err;
+    if (err != ERR_OK) {
+        return err;
+    }
 
     if (is_partition_empty(&mbr.partitions[index])) {
         return ERR_NOT_FOUND;
@@ -118,18 +131,23 @@ ErrorCode mbr_delete_partition(Disk *disk, int index) {
 }
 
 ErrorCode mbr_set_active(Disk *disk, int index) {
-    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
-    if (index < 0 || index >= 4) return ERR_INVALID_ARGUMENT;
+    if (!disk || !disk->is_open) {
+        return ERR_DISK_OPEN;
+    }
+    if (index < 0 || index >= 4) {
+        return ERR_INVALID_ARGUMENT;
+    }
 
     MbrSector mbr;
     ErrorCode err = mbr_read(disk, &mbr);
-    if (err != ERR_OK) return err;
+    if (err != ERR_OK) {
+        return err;
+    }
 
     if (is_partition_empty(&mbr.partitions[index])) {
         return ERR_NOT_FOUND;
     }
 
-    // Сбрасываем флаг у всех
     for (int i = 0; i < 4; i++) {
         mbr.partitions[i].boot_flag = 0;
     }
@@ -138,12 +156,18 @@ ErrorCode mbr_set_active(Disk *disk, int index) {
 }
 
 ErrorCode mbr_set_inactive(Disk *disk, int index) {
-    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
-    if (index < 0 || index >= 4) return ERR_INVALID_ARGUMENT;
+    if (!disk || !disk->is_open) {
+        return ERR_DISK_OPEN;
+    }
+    if (index < 0 || index >= 4) {
+        return ERR_INVALID_ARGUMENT;
+    }
 
     MbrSector mbr;
     ErrorCode err = mbr_read(disk, &mbr);
-    if (err != ERR_OK) return err;
+    if (err != ERR_OK) {
+        return err;
+    }
 
     if (is_partition_empty(&mbr.partitions[index])) {
         return ERR_NOT_FOUND;
@@ -154,12 +178,18 @@ ErrorCode mbr_set_inactive(Disk *disk, int index) {
 }
 
 ErrorCode mbr_set_partition_type(Disk *disk, int index, uint8_t type) {
-    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
-    if (index < 0 || index >= 4) return ERR_INVALID_ARGUMENT;
+    if (!disk || !disk->is_open) {
+        return ERR_DISK_OPEN;
+    }
+    if (index < 0 || index >= 4) {
+        return ERR_INVALID_ARGUMENT;
+    }
 
     MbrSector mbr;
     ErrorCode err = mbr_read(disk, &mbr);
-    if (err != ERR_OK) return err;
+    if (err != ERR_OK) {
+        return err;
+    }
 
     if (is_partition_empty(&mbr.partitions[index])) {
         return ERR_NOT_FOUND;
@@ -170,13 +200,21 @@ ErrorCode mbr_set_partition_type(Disk *disk, int index, uint8_t type) {
 }
 
 ErrorCode mbr_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uint64_t *size_sectors) {
-    if (!disk || !disk->is_open) return ERR_DISK_OPEN;
-    if (index < 0 || index >= 4) return ERR_INVALID_ARGUMENT;
-    if (!start_lba || !size_sectors) return ERR_INVALID_ARGUMENT;
+    if (!disk || !disk->is_open) {
+        return ERR_DISK_OPEN;
+    }
+    if (index < 0 || index >= 4) {
+        return ERR_INVALID_ARGUMENT;
+    }
+    if (!start_lba || !size_sectors) {
+        return ERR_INVALID_ARGUMENT;
+    }
 
     MbrSector mbr;
     ErrorCode err = mbr_read(disk, &mbr);
-    if (err != ERR_OK) return err;
+    if (err != ERR_OK) {
+        return err;
+    }
 
     if (is_partition_empty(&mbr.partitions[index])) {
         return ERR_NOT_FOUND;
@@ -201,21 +239,22 @@ void mbr_print_info(Disk *disk) {
 
     int count = 0;
     for (int i = 0; i < 4; i++) {
-        if (!is_partition_empty(&mbr.partitions[i])) count++;
+        if (!is_partition_empty(&mbr.partitions[i])) {
+            count++;
+        }
     }
     printf("MBR: %d primary partition(s)\n", count);
     for (int i = 0; i < 4; i++) {
         if (!is_partition_empty(&mbr.partitions[i])) {
             MbrPartitionEntry *p = &mbr.partitions[i];
             printf("  Part %d: type=0x%02X, %s, LBA start=%u, size=%u sectors\n",
-                   i+1, p->partition_type,
+                   i + 1, p->partition_type,
                    (p->boot_flag == 0x80) ? "active" : "inactive",
                    p->lba_start, p->sector_count);
         }
     }
 }
 
-// Таблица соответствия имён и типов MBR
 static const struct {
     const char *name;
     uint8_t type;
@@ -237,11 +276,14 @@ static const struct {
 };
 
 bool mbr_type_from_name(const char *name, uint8_t *type) {
-    if (!name || !type) return false;
+    if (!name || !type) {
+        return false;
+    }
 
     char name_upper[32];
-    if (!strlcpy_safe(name_upper, sizeof(name_upper), name))
+    if (!strlcpy_safe(name_upper, sizeof(name_upper), name)) {
         return false;
+    }
     str_toupper(name_upper);
 
     for (int i = 0; mbr_type_table[i].name != NULL; i++) {

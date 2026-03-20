@@ -1,7 +1,9 @@
-#include "disk.h"
+#include "fat32.h"
 #include "utils.h"
 #include "cmd_disk.h"
 #include "partition.h"
+#include "cmd_common.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +16,9 @@ static ErrorCode disk_read_and_dump(Disk *disk, uint64_t offset_bytes, uint64_t 
     }
 
     uint8_t *buffer = (uint8_t*)malloc(count_bytes);
-    if (!buffer) return ERR_OUT_OF_MEMORY;
+    if (!buffer) {
+        return ERR_OUT_OF_MEMORY;
+    }
 
     ErrorCode err = disk_read(disk, buffer, count_bytes, offset_bytes);
     if (err != ERR_OK) {
@@ -27,24 +31,26 @@ static ErrorCode disk_read_and_dump(Disk *disk, uint64_t offset_bytes, uint64_t 
     for (uint64_t i = 0; i < count_bytes; i += 16) {
         printf("%016" PRIx64 ": ", offset_bytes + i);
         uint64_t line_len = count_bytes - i;
-        if (line_len > 16) line_len = 16;
-        
-        // Hex
+        if (line_len > 16) {
+            line_len = 16;
+        }
+
         for (uint64_t j = 0; j < line_len; j++) {
             printf("%02x ", buffer[i + j]);
         }
-        // Если строка неполная, дополняем пробелами
         if (line_len < 16) {
             for (uint64_t j = 0; j < 16 - line_len; j++) {
                 printf("   ");
             }
         }
         printf(" ");
-        // ASCII
         for (uint64_t j = 0; j < line_len; j++) {
             uint8_t c = buffer[i + j];
-            if (c >= 32 && c <= 126) printf("%c", c);
-            else printf(".");
+            if (c >= 32 && c <= 126) {
+                printf("%c", c);
+            } else {
+                printf(".");
+            }
         }
         printf("\n");
     }
@@ -69,11 +75,11 @@ ErrorCode cmd_disk_create(CMDArgs *args) {
 
     if (args->table) {
         PartitionTableType table_type;
-        if (strcmp(args->table, "mbr") == 0)
+        if (strcmp(args->table, "mbr") == 0) {
             table_type = PT_MBR;
-        else if (strcmp(args->table, "gpt") == 0)
+        } else if (strcmp(args->table, "gpt") == 0) {
             table_type = PT_GPT;
-        else {
+        } else {
             fprintf(stderr, "Error: unknown partition table type: %s\n", args->table);
             disk_close(&disk);
             return ERR_INVALID_ARGUMENT;
@@ -106,13 +112,17 @@ ErrorCode cmd_disk_info(CMDArgs *args) {
     err = partition_detect_type(&disk, &table_type);
     if (err == ERR_OK) {
         const char *type_str = "Unknown";
-        if (table_type == PT_MBR) type_str = "MBR";
-        else if (table_type == PT_GPT) type_str = "GPT";
+        if (table_type == PT_MBR) {
+            type_str = "MBR";
+        } else if (table_type == PT_GPT) {
+            type_str = "GPT";
+        }
         printf("Partition table: %s\n", type_str);
-        if (table_type != PT_UNKNOWN)
+        if (table_type != PT_UNKNOWN) {
             partition_print_info(&disk);
-        else
+        } else {
             printf("No valid partition table found.\n");
+        }
     } else {
         printf("Failed to detect partition table (error %d).\n", err);
     }
@@ -175,16 +185,6 @@ ErrorCode cmd_disk_read_s(CMDArgs *args) {
 }
 
 ErrorCode cmd_mbr_write(CMDArgs *args) {
-    if (!args->file) {
-        fprintf(stderr, "Error: missing -file= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->src) {
-        fprintf(stderr, "Error: missing -src= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-
-    // Читаем файл с кодом
     uint8_t *code_buf = NULL;
     size_t code_size = 0;
     ErrorCode err = read_whole_file(args->src, &code_buf, &code_size);
@@ -199,7 +199,6 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
         return ERR_INVALID_ARGUMENT;
     }
 
-    // Открываем диск
     Disk disk;
     err = disk_open(args->file, &disk);
     if (err != ERR_OK) {
@@ -208,7 +207,6 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
         return err;
     }
 
-    // Читаем текущий MBR (512 байт)
     uint8_t mbr[512];
     err = disk_read(&disk, mbr, 512, 0);
     if (err != ERR_OK) {
@@ -218,21 +216,17 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
         return err;
     }
 
-    // Проверяем сигнатуру в конце (не обязательно, но полезно)
     if (mbr[510] != 0x55 || mbr[511] != 0xAA) {
         fprintf(stderr, "Warning: MBR signature not found, but will write anyway.\n");
     }
 
-    // Определяем, сколько байт записать (не более 446)
     size_t write_size = (code_size < 446) ? code_size : 446;
     if (code_size > 446) {
         fprintf(stderr, "Warning: source file is larger than 446 bytes. Only first 446 bytes will be written.\n");
     }
 
-    // Копируем код в начало MBR
     memcpy(mbr, code_buf, write_size);
 
-    // Записываем обновлённый MBR обратно
     err = disk_write(&disk, mbr, 512, 0);
     if (err != ERR_OK) {
         free(code_buf);
@@ -248,20 +242,6 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
 }
 
 ErrorCode cmd_bpb_write(CMDArgs *args) {
-    if (!args->file) {
-        fprintf(stderr, "Error: missing -file= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->part) {
-        fprintf(stderr, "Error: missing -part= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-    if (!args->src) {
-        fprintf(stderr, "Error: missing -src= parameter.\n");
-        return ERR_MISSING_ARGUMENT;
-    }
-
-    // Читаем файл с кодом
     uint8_t *code_buf = NULL;
     size_t code_size = 0;
     ErrorCode err = read_whole_file(args->src, &code_buf, &code_size);
@@ -276,88 +256,57 @@ ErrorCode cmd_bpb_write(CMDArgs *args) {
         return ERR_INVALID_ARGUMENT;
     }
 
-    // Открываем диск
     Disk disk;
-    err = disk_open(args->file, &disk);
-    if (err != ERR_OK) {
-        free(code_buf);
-        fprintf(stderr, "Failed to open disk image: %s\n", args->file);
-        return err;
-    }
-
-    // Проверяем таблицу разделов
-    PartitionTableType table_type;
-    err = partition_detect_type(&disk, &table_type);
-    if (err != ERR_OK || table_type == PT_UNKNOWN) {
-        disk_close(&disk);
-        free(code_buf);
-        fprintf(stderr, "No valid partition table found.\n");
-        return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
-    }
-
-    int part_index = parse_part_index(args->part);
-    if (part_index < 0) {
-        disk_close(&disk);
-        free(code_buf);
-        fprintf(stderr, "Invalid partition number: %s\n", args->part);
-        return ERR_INVALID_ARGUMENT;
-    }
-
     uint64_t start_lba, size_sectors;
-    err = partition_get_info(&disk, part_index, &start_lba, &size_sectors);
+    err = open_disk_and_get_partition_info(args, &disk, &start_lba, &size_sectors);
     if (err != ERR_OK) {
-        disk_close(&disk);
         free(code_buf);
-        if (err == ERR_NOT_FOUND)
-            fprintf(stderr, "Partition %d does not exist.\n", part_index + 1);
-        else
-            fprintf(stderr, "Failed to get partition info.\n");
         return err;
     }
 
-    // Проверяем, что раздел содержит FAT32
     Fat32Info info;
     err = fat32_get_info(&disk, start_lba, &info);
     if (err != ERR_OK) {
         disk_close(&disk);
         free(code_buf);
-        fprintf(stderr, "Partition %d is not a valid FAT32 filesystem.\n", part_index + 1);
+        fprintf(stderr, "Partition %s is not a valid FAT32 filesystem.\n", args->part);
         return ERR_INVALID_SIGNATURE;
     }
 
-    // Читаем BPB-сектор раздела
     uint8_t sector[512];
     err = disk_read(&disk, sector, 512, start_lba * 512);
     if (err != ERR_OK) {
-        free(code_buf);
         disk_close(&disk);
+        free(code_buf);
         fprintf(stderr, "Failed to read BPB sector at LBA %" PRIu64 ".\n", start_lba);
         return err;
     }
 
-    const uint32_t code_offset = sizeof(Fat32BPB); // 90 байт
-    const uint32_t max_code_size = 512 - code_offset - 2; // 420 байт (оставляем сигнатуру)
+    const uint32_t code_offset = sizeof(Fat32BPB);
+    const uint32_t max_code_size = 512 - code_offset - 2;
 
     if (code_size > max_code_size) {
-        fprintf(stderr, "Warning: source file is larger than available space (%u bytes). "
-                        "Only first %u bytes will be written.\n", max_code_size, max_code_size);
+        fprintf(stderr, "Warning: source file is larger than available space (%u bytes). Only first %u bytes will be written.\n", max_code_size, max_code_size);
         code_size = max_code_size;
     }
 
-    // Копируем код в буфер сектора
     memcpy(sector + code_offset, code_buf, code_size);
 
-    // Записываем обновлённый сектор
     err = disk_write(&disk, sector, 512, start_lba * 512);
     if (err != ERR_OK) {
-        free(code_buf);
         disk_close(&disk);
+        free(code_buf);
         fprintf(stderr, "Failed to write BPB sector at LBA %" PRIu64 ".\n", start_lba);
         return err;
     }
 
-    printf("Successfully wrote %zu bytes of boot code to partition %d BPB (LBA %" PRIu64 ", offset %u).\n",
-           code_size, part_index + 1, start_lba, code_offset);
+    err = disk_write(&disk, sector, 512, (start_lba + 6) * 512);
+    if (err != ERR_OK) {
+        fprintf(stderr, "Warning: failed to write backup BPB sector.\n");
+    }
+
+    printf("Successfully wrote %zu bytes of boot code to partition %s BPB (LBA %" PRIu64 ", offset %u).\n",
+           code_size, args->part, start_lba, code_offset);
 
     free(code_buf);
     disk_close(&disk);
