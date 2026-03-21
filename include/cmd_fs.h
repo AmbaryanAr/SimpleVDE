@@ -33,4 +33,8 @@ ErrorCode cmd_fs_reserve_clear(CMDArgs *args);
 ErrorCode cmd_fs_reserve_dump(CMDArgs *args);
 ErrorCode cmd_fs_reserve_info(CMDArgs *args);
 
+ErrorCode cmd_fs_reserve_boot_set(CMDArgs *args);
+ErrorCode cmd_fs_reserve_boot_show(CMDArgs *args);
+ErrorCode cmd_fs_reserve_boot_clear(CMDArgs *args);
+
 #endif

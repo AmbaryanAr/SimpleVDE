@@ -19,7 +19,7 @@ void print_global_help(void) {
     printf("Global options:\n");
     printf("  --help, -h                 Show this help\n");
     printf("  --version, -v              Show version\n");
-    printf("  --<category> ?              Show help for a specific category\n\n");
+    printf("  --<category> help          Show help for a specific category\n\n");
 
     printf("Categories:\n");
     printf("  disk      - Disk operations (create, info, read, read-s, mbr-write, bpb-write)\n");
@@ -30,8 +30,8 @@ void print_global_help(void) {
     printf("  mbr       - Write boot code to MBR\n");
     printf("  bpb       - Write boot code to BPB of a FAT32 partition\n\n");
 
-    printf("For detailed help on a category, use: --<category> ?\n");
-    printf("Example: --disk ?\n");
+    printf("For detailed help on a category, use: --<category> help\n");
+    printf("Example: --disk help\n");
 }
 
 void print_category_help(const char *category) {
@@ -70,6 +70,9 @@ void print_category_help(const char *category) {
         printf("  --fs-reserve-rm -file=<path> -part=<num> -name=<entry-name>   Remove entry by name\n");
         printf("  --fs-reserve-clear -file=<path> -part=<num>                   Clear all entries\n");
         printf("  --fs-reserve-dump -file=<path> -part=<num>                    Hex dump of reserve cluster\n");
+        printf("  --fs-reserve-boot-set -file=<path> -part=<num> -name=<entry-name>\n");
+        printf("  --fs-reserve-boot-show -file=<path> -part=<num>\n");
+        printf("  --fs-reserve-boot-clear -file=<path> -part=<num>\n");
         printf("  --fs-reserve-info -file=<path> -part=<num>                    Show reserve info\n");
     } else if (strcmp(category, "shell") == 0) {
         printf("Interactive shell:\n");

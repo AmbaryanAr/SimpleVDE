@@ -363,3 +363,39 @@ ErrorCode cmd_fs_reserve_info(CMDArgs *args) {
     disk_close(&disk);
     return err;
 }
+
+ErrorCode cmd_fs_reserve_boot_set(CMDArgs *args) {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    if (err != ERR_OK) return err;
+
+    err = fat32_reserve_boot_set(&disk, start_lba, args->name);
+    disk_close(&disk);
+    return err;
+}
+
+ErrorCode cmd_fs_reserve_boot_show(CMDArgs *args) {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    if (err != ERR_OK) return err;
+
+    err = fat32_reserve_boot_show(&disk, start_lba);
+    disk_close(&disk);
+    return err;
+}
+
+ErrorCode cmd_fs_reserve_boot_clear(CMDArgs *args) {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    if (err != ERR_OK) return err;
+
+    err = fat32_reserve_boot_clear(&disk, start_lba);
+    disk_close(&disk);
+    return err;
+}

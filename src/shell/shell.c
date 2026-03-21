@@ -222,6 +222,9 @@ static void print_help(void) {
     printf("  reserve clear             - clear all entries\n");
     printf("  reserve dump              - hex dump of reserve cluster\n");
     printf("  reserve info              - show reserve info\n\n");
+	printf("  reserve boot set <name>     - set file as boot entry\n");
+    printf("  reserve boot show           - show current boot entry\n");
+    printf("  reserve boot clear          - clear boot entry\n");
     printf("  exit                      - exit shell\n");
     printf("  help, ?                   - show this help\n");
 }
@@ -411,11 +414,42 @@ static int cmd_reserve(int argc, char **argv) {
             fprintf(stderr, "Error: %s\n", error_code_to_string(err));
             return 1;
         }
-    } else {
-        fprintf(stderr, "Unknown reserve subcommand: %s\n", sub);
-        return 1;
+    } else if (strcmp(sub, "boot") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "Usage: reserve boot set <name> | reserve boot show | reserve boot clear\n");
+            return 1;
+        }
+        const char *subsub = argv[2];
+        if (strcmp(subsub, "set") == 0) {
+            if (argc < 4) {
+                fprintf(stderr, "Usage: reserve boot set <name>\n");
+                return 1;
+            }
+            ErrorCode err = fat32_reserve_boot_set(&shell_state.disk, shell_state.start_lba, argv[3]);
+            if (err != ERR_OK) {
+                fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+                return 1;
+            }
+            printf("Boot entry set.\n");
+        } else if (strcmp(subsub, "show") == 0) {
+            ErrorCode err = fat32_reserve_boot_show(&shell_state.disk, shell_state.start_lba);
+            if (err != ERR_OK) {
+                fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+                return 1;
+            }
+        } else if (strcmp(subsub, "clear") == 0) {
+            ErrorCode err = fat32_reserve_boot_clear(&shell_state.disk, shell_state.start_lba);
+            if (err != ERR_OK) {
+                fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+                return 1;
+            }
+            printf("Boot entry cleared.\n");
+        } else {
+            fprintf(stderr, "Unknown boot subcommand: %s\n", subsub);
+            return 1;
+        }
     }
-    return 0;
+	return 0;
 }
 
 static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,

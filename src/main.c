@@ -246,6 +246,19 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");
             err = cmd_fs_reserve_info(&args);
+		} else if (strcmp(args.command, "reserve-boot-set") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.name, "name");
+            err = cmd_fs_reserve_boot_set(&args);
+        } else if (strcmp(args.command, "reserve-boot-show") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_reserve_boot_show(&args);
+        } else if (strcmp(args.command, "reserve-boot-clear") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_reserve_boot_clear(&args);
         } else {
             fprintf(stderr, "Error: unknown fs command '%s'.\n", args.command);
             return 1;

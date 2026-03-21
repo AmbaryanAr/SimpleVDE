@@ -229,5 +229,8 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
 ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba);
 ErrorCode fat32_reserve_dump(Disk *disk, uint64_t start_lba);
 ErrorCode fat32_reserve_info(Disk *disk, uint64_t start_lba);
+ErrorCode fat32_reserve_boot_set(Disk *disk, uint64_t start_lba, const char *name);
+ErrorCode fat32_reserve_boot_show(Disk *disk, uint64_t start_lba);
+ErrorCode fat32_reserve_boot_clear(Disk *disk, uint64_t start_lba);
 
 #endif
