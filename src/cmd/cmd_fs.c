@@ -54,7 +54,7 @@ static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
         }
 
         children = realloc(children, (child_count + 1) * sizeof(child_entry_t));
-        children[child_count].name = strdup(display_name);
+        children[child_count].name = my_strdup(display_name);
         children[child_count].cluster = ((uint32_t)se->first_cluster_hi << 16) | se->first_cluster_lo;
         children[child_count].is_dir = (se->attr & FAT32_ATTR_DIRECTORY) != 0;
         children[child_count].size = se->file_size;

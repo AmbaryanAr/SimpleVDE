@@ -9,6 +9,7 @@ simplevde.exe
 simplevde.a
 
 # Директория с объектными файлами
+debag/
 obj/
 build/
 

@@ -72,8 +72,7 @@ ErrorCode fat32_find_dir(Disk *disk, const Fat32Info *info, const char *path, ui
     char *path_copy = my_strdup(path);
     if (!path_copy) return ERR_OUT_OF_MEMORY;
 
-    char *saveptr;
-    char *token = strtok_r(path_copy + 1, "/", &saveptr);
+    char *token = strtok(path_copy + 1, "/");
     ErrorCode err = ERR_OK;
 
     while (token != NULL) {
@@ -129,7 +128,7 @@ ErrorCode fat32_find_dir(Disk *disk, const Fat32Info *info, const char *path, ui
         }
 
         current_cluster = found_cluster;
-        token = strtok_r(NULL, "/", &saveptr);
+        token = strtok(NULL, "/");
     }
 
     free(path_copy);
