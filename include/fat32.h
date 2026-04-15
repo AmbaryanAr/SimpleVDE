@@ -51,31 +51,6 @@
 #define FAT32_ATTR_FILE_MASK     (FAT32_ATTR_READ_ONLY | FAT32_ATTR_HIDDEN | FAT32_ATTR_SYSTEM | FAT32_ATTR_ARCHIVE)
 #define FAT32_ATTR_DIR_MASK      (FAT32_ATTR_DIRECTORY)
 
-// ==================== Коды ошибок FAT32 ====================
-typedef enum {
-    FAT32_SUCCESS = 0,
-    FAT32_ERR_INVALID_PARAM,
-    FAT32_ERR_OUT_OF_MEMORY,
-    FAT32_ERR_IO_READ,
-    FAT32_ERR_IO_WRITE,
-    FAT32_ERR_BAD_BPB,
-    FAT32_ERR_FSINFO_CORRUPT,
-    FAT32_ERR_VOLUME_NOT_MOUNTED,
-    FAT32_ERR_NO_FREE_CLUSTER,
-    FAT32_ERR_BAD_CLUSTER,
-    FAT32_ERR_FAT_CORRUPT,
-    FAT32_ERR_DIR_NO_FREE_ENTRY,
-    FAT32_ERR_DIR_NOT_FOUND,
-    FAT32_ERR_DIR_ALREADY_EXISTS,
-    FAT32_ERR_DIR_IS_NOT_DIRECTORY,
-    FAT32_ERR_NAME_TOO_LONG,
-    FAT32_ERR_NAME_INVALID,
-    FAT32_ERR_UTF16_CONVERSION,
-    FAT32_ERR_LFN_CHECKSUM,
-    FAT32_ERR_TOO_MANY_LFN_ENTRIES,
-    FAT32_ERR_SFN_SUFFIX_OVERFLOW,
-} Fat32ErrorCode;
-
 #pragma pack(push, 1)
 typedef struct {
     uint8_t  jump_boot[3];
@@ -210,7 +185,7 @@ ErrorCode fat32_find_dir(Disk *disk, const Fat32Info *info, const char *path, ui
 ErrorCode fat32_list_dir(Disk *disk, uint64_t start_lba, const char *path);
 
 // ==================== Функции подготовки записей ====================
-Fat32ErrorCode fat32_prepare_entry(const char *utf8_name, uint8_t attr,
+ErrorCode fat32_prepare_entry(const char *utf8_name, uint8_t attr,
                                    const uint8_t *dir_buffer, uint32_t entry_count,
                                    fat32_entry_info_t *info);
 void fat32_free_entry_info(fat32_entry_info_t *info);

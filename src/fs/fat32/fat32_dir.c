@@ -454,13 +454,13 @@ ErrorCode fat32_create_dir(Disk *disk, uint64_t start_lba, const char *path) {
     }
 
     fat32_entry_info_t entry_info;
-    Fat32ErrorCode ferr = fat32_prepare_entry(new_name, FAT32_ATTR_DIRECTORY,
+    err = fat32_prepare_entry(new_name, FAT32_ATTR_DIRECTORY,
                                               parent_buffer, parent_entries_count, &entry_info);
     free(parent_buffer);
-    if (ferr != FAT32_SUCCESS) {
+    if (err != ERR_OK) {
         fat32_dir_close(&parent_dir);
         free(path_copy);
-        return ERR_INTERNAL;
+        return err;
     }
 
     fat32_set_current_time(&entry_info);

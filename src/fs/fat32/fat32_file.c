@@ -302,11 +302,11 @@ ErrorCode fat32_copy_file(Disk *disk, uint64_t start_lba, const char *host_path,
     }
 
     fat32_entry_info_t entry_info;
-    Fat32ErrorCode ferr = fat32_prepare_entry(file_name, FAT32_ATTR_ARCHIVE,
+    ErrorCode ferr = fat32_prepare_entry(file_name, FAT32_ATTR_ARCHIVE,
                                               parent_dir_buffer, parent_dir_entries,
                                               &entry_info);
     free(parent_dir_buffer);
-    if (ferr != FAT32_SUCCESS) {
+    if (ferr != ERR_OK) {
         fat32_free_cluster_chain(disk, &info, first_cluster);
         fat32_dir_close(&parent_dir);
         free(dest_copy);

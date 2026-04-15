@@ -183,7 +183,7 @@ ErrorCode fat32_reserve_init(Disk *disk, uint64_t start_lba) {
     err = set_boot_cluster(disk, start_lba, 0);
     if (err != ERR_OK) {
         // не фатально, но сообщим
-        fprintf(stderr, "Warning: could not clear boot cluster field.\n");
+        return err;
     }
 
     return ERR_OK;
@@ -198,8 +198,7 @@ ErrorCode fat32_reserve_list(Disk *disk, uint64_t start_lba) {
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        fprintf(stderr, "Reserve cluster not initialized.\n");
-        return ERR_NOT_FOUND;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t boot_cluster = 0;
@@ -235,8 +234,7 @@ ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
     const char *fname = strrchr(path, '/');
     if (fname) fname++; else fname = path;
     if (!is_valid_name(fname)) {
-        fprintf(stderr, "File name contains invalid characters or is too long.\n");
-        return ERR_INVALID_ARGUMENT;
+        return ERR_FAT32_NAME_INVALID; // или ERR_INVALID_ARGUMENT
     }
 
     Fat32Info info;
@@ -247,19 +245,12 @@ ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        fprintf(stderr, "Reserve cluster not initialized. Use reserve-init first.\n");
-        return ERR_NOT_FOUND;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t file_cluster, file_size;
     err = get_file_cluster(disk, &info, path, &file_cluster, &file_size);
-    if (err != ERR_OK) {
-        if (err == ERR_NOT_FOUND)
-            fprintf(stderr, "File not found.\n");
-        else if (err == ERR_INVALID_ARGUMENT)
-            fprintf(stderr, "Path is not a file (maybe a directory).\n");
-        return err;
-    }
+    if (err != ERR_OK) return err;
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
     uint32_t slots = cluster_size / RESERVED_SLOT_SIZE;
@@ -279,11 +270,9 @@ ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
             uint32_t cl = *(uint32_t*)(slot + RESERVED_NAME_SIZE);
             if (strcmp(name, fname) == 0) {
                 free(buffer);
-                fprintf(stderr, "Entry with name '%s' already exists.\n", fname);
                 return ERR_ALREADY_EXISTS;
             }
             if (cl == file_cluster) {
-                fprintf(stderr, "Cluster %u already used by entry '%s'.\n", file_cluster, name);
                 free(buffer);
                 return ERR_ALREADY_EXISTS;
             }
@@ -293,7 +282,6 @@ ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
     int empty = find_empty_slot(buffer, slots);
     if (empty < 0) {
         free(buffer);
-        fprintf(stderr, "No free slots in reserve cluster.\n");
         return ERR_NO_FREE_SPACE;
     }
 
@@ -318,8 +306,7 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        fprintf(stderr, "Reserve cluster not initialized.\n");
-        return ERR_NOT_FOUND;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
@@ -346,7 +333,6 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
 
     if (found < 0) {
         free(buffer);
-        fprintf(stderr, "Entry '%s' not found.\n", name);
         return ERR_NOT_FOUND;
     }
 
@@ -355,7 +341,7 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
     get_boot_cluster(disk, start_lba, &boot_cluster);
     if (found_cluster == boot_cluster) {
         set_boot_cluster(disk, start_lba, 0);
-        printf("Boot file cleared.\n");
+        // можно не выводить сообщение здесь; пусть команда сама решит
     }
 
     memset(buffer + found * RESERVED_SLOT_SIZE, 0, RESERVED_SLOT_SIZE);
@@ -364,6 +350,7 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
     return err;
 }
 
+// fat32_reserve_clear
 ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba) {
     Fat32Info info;
     ErrorCode err = fat32_get_info(disk, start_lba, &info);
@@ -373,8 +360,7 @@ ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba) {
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        fprintf(stderr, "Reserve cluster not initialized.\n");
-        return ERR_NOT_FOUND;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
@@ -387,7 +373,7 @@ ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba) {
 
     // Также очищаем загрузочный кластер
     set_boot_cluster(disk, start_lba, 0);
-    return err;
+    return ERR_OK;
 }
 
 
@@ -400,8 +386,7 @@ ErrorCode fat32_reserve_dump(Disk *disk, uint64_t start_lba) {
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        fprintf(stderr, "Reserve cluster not initialized.\n");
-        return ERR_NOT_FOUND;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
@@ -434,8 +419,7 @@ ErrorCode fat32_reserve_info(Disk *disk, uint64_t start_lba) {
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        printf("Reserve cluster not initialized.\n");
-        return ERR_OK;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t boot_cluster;
@@ -481,8 +465,7 @@ ErrorCode fat32_reserve_boot_set(Disk *disk, uint64_t start_lba, const char *nam
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        fprintf(stderr, "Reserve cluster not initialized.\n");
-        return ERR_NOT_FOUND;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
@@ -509,7 +492,6 @@ ErrorCode fat32_reserve_boot_set(Disk *disk, uint64_t start_lba, const char *nam
     free(buffer);
 
     if (found < 0) {
-        fprintf(stderr, "Entry '%s' not found in reserve.\n", name);
         return ERR_NOT_FOUND;
     }
 
@@ -529,8 +511,7 @@ ErrorCode fat32_reserve_boot_show(Disk *disk, uint64_t start_lba) {
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
     if (reserve_cluster == 0) {
-        printf("Reserve cluster not initialized.\n");
-        return ERR_OK;
+        return ERR_RESERVE_NOT_INIT;
     }
 
     uint32_t boot_cluster;
@@ -570,8 +551,5 @@ ErrorCode fat32_reserve_boot_show(Disk *disk, uint64_t start_lba) {
 }
 
 ErrorCode fat32_reserve_boot_clear(Disk *disk, uint64_t start_lba) {
-    ErrorCode err = set_boot_cluster(disk, start_lba, 0);
-    if (err != ERR_OK) return err;
-    printf("Boot file cleared.\n");
-    return ERR_OK;
+    return set_boot_cluster(disk, start_lba, 0);
 }

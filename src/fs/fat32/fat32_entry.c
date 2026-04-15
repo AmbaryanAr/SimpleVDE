@@ -2,7 +2,6 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
-#include <time.h>
 
 // ==================== Вспомогательные функции ====================
 
@@ -99,14 +98,14 @@ static int find_next_suffix(const uint8_t *dir_buffer, uint32_t entry_count, con
 }
 
 // Генерация уникального SFN (всегда с суффиксом)
-static Fat32ErrorCode make_unique_sfn(const uint8_t *dir_buffer, uint32_t entry_count,
+static ErrorCode make_unique_sfn(const uint8_t *dir_buffer, uint32_t entry_count,
                                       const char *base, const char *ext,
                                       uint8_t sfn[11]) {
     uint8_t temp_sfn[11];
     make_basic_sfn_from_parts(base, ext, temp_sfn);
     int suffix = find_next_suffix(dir_buffer, entry_count, temp_sfn);
     if (suffix > 99) {
-        return FAT32_ERR_SFN_SUFFIX_OVERFLOW;
+        return ERR_FAT32_SFN_SUFFIX_OVERFLOW;
     }
 
     memcpy(sfn, temp_sfn, 5);
@@ -119,20 +118,20 @@ static Fat32ErrorCode make_unique_sfn(const uint8_t *dir_buffer, uint32_t entry_
         sfn[7] = '0' + (uint8_t)(suffix % 10);
     }
     memcpy(sfn + 8, temp_sfn + 8, 3);
-    return FAT32_SUCCESS;
+    return ERR_OK;
 }
 
 // Создание LFN-записей для заданного UTF-16LE имени и контрольной суммы
-static Fat32ErrorCode create_lfn_entries(const uint16_t *utf16_name, size_t len,
+static ErrorCode create_lfn_entries(const uint16_t *utf16_name, size_t len,
                                          uint8_t checksum,
                                          Fat32LongEntry **entries_out, uint8_t *count_out) {
-    if (len > 255) return FAT32_ERR_NAME_TOO_LONG;
+    if (len > 255) return ERR_FAT32_NAME_TOO_LONG;
 
     uint8_t num_entries = (uint8_t)((len + 12) / 13);
-    if (num_entries > FAT32_MAX_LFN_ENTRIES) return FAT32_ERR_TOO_MANY_LFN_ENTRIES;
+    if (num_entries > FAT32_MAX_LFN_ENTRIES) return ERR_FAT32_TOO_MANY_LFN_ENTRIES;
 
     Fat32LongEntry *entries = (Fat32LongEntry*)calloc(num_entries, sizeof(Fat32LongEntry));
-    if (!entries) return FAT32_ERR_OUT_OF_MEMORY;
+    if (!entries) return ERR_OUT_OF_MEMORY;
 
     for (uint8_t i = 0; i < num_entries; i++) {
         Fat32LongEntry *lfn = &entries[i];
@@ -157,7 +156,7 @@ static Fat32ErrorCode create_lfn_entries(const uint16_t *utf16_name, size_t len,
 
     *entries_out = entries;
     *count_out = num_entries;
-    return FAT32_SUCCESS;
+    return ERR_OK;
 }
 
 // ==================== Преобразование времени ====================
@@ -181,22 +180,22 @@ static uint16_t fat_date_from_tm(const struct tm *tm) {
 
 // ==================== Экспортируемые функции ====================
 
-Fat32ErrorCode fat32_prepare_entry(const char *utf8_name, uint8_t attr,
+ErrorCode fat32_prepare_entry(const char *utf8_name, uint8_t attr,
                                    const uint8_t *dir_buffer, uint32_t entry_count,
                                    fat32_entry_info_t *info) {
-    if (!utf8_name || !info || !dir_buffer) return FAT32_ERR_INVALID_PARAM;
-    if (!is_all_ascii(utf8_name)) return FAT32_ERR_NAME_INVALID;
+    if (!utf8_name || !info || !dir_buffer) return ERR_INVALID_ARGUMENT;
+    if (!is_all_ascii(utf8_name)) return ERR_FAT32_NAME_INVALID;
 
     memset(info, 0, sizeof(fat32_entry_info_t));
 
     size_t utf8_len = strlen(utf8_name);
     uint16_t *utf16 = (uint16_t*)malloc((utf8_len + 1) * sizeof(uint16_t));
-    if (!utf16) return FAT32_ERR_OUT_OF_MEMORY;
+    if (!utf16) return ERR_OUT_OF_MEMORY;
 
     size_t utf16_len = ascii_to_utf16le(utf8_name, utf16, utf8_len + 1);
     if (utf16_len == 0) {
         free(utf16);
-        return FAT32_ERR_UTF16_CONVERSION;
+        return ERR_FAT32_UTF16_CONVERSION;
     }
 
     info->utf16_name = utf16;
@@ -208,8 +207,8 @@ Fat32ErrorCode fat32_prepare_entry(const char *utf8_name, uint8_t attr,
     char ext[4];
     split_name(utf8_name, base, sizeof(base), ext, sizeof(ext));
 
-    Fat32ErrorCode err = make_unique_sfn(dir_buffer, entry_count, base, ext, info->sfn);
-    if (err != FAT32_SUCCESS) {
+    ErrorCode err = make_unique_sfn(dir_buffer, entry_count, base, ext, info->sfn);
+    if (err != ERR_OK) {
         free(utf16);
         info->utf16_name = NULL;
         return err;
@@ -218,14 +217,14 @@ Fat32ErrorCode fat32_prepare_entry(const char *utf8_name, uint8_t attr,
     uint8_t checksum = calc_checksum(info->sfn);
     err = create_lfn_entries(utf16, utf16_len, checksum,
                              &info->lfn_entries, &info->lfn_count);
-    if (err != FAT32_SUCCESS) {
+    if (err != ERR_OK) {
         free(utf16);
         info->utf16_name = NULL;
         return err;
     }
 
     info->total_entries = info->lfn_count + 1;
-    return FAT32_SUCCESS;
+    return ERR_OK;
 }
 
 void fat32_free_entry_info(fat32_entry_info_t *info) {

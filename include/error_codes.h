@@ -20,7 +20,23 @@ typedef enum {
     ERR_INTERNAL,             // Внутренняя ошибка
     ERR_NOT_IMPLEMENTED,      // Функция не реализована
     ERR_DIR_NOT_EMPTY,        // Каталог не пуст
-    ERR_UNKNOWN               // Неизвестная ошибка
+    ERR_UNKNOWN,              // Неизвестная ошибка
+    // Коды ошибок FAT32
+    ERR_FAT32_BAD_BPB,
+    ERR_FAT32_FSINFO_CORRUPT,
+    ERR_FAT32_VOLUME_NOT_MOUNTED,
+    ERR_FAT32_NO_FREE_CLUSTER,
+    ERR_FAT32_BAD_CLUSTER,
+    ERR_FAT32_FAT_CORRUPT,
+    ERR_FAT32_DIR_NO_FREE_ENTRY,
+    ERR_FAT32_DIR_IS_NOT_DIRECTORY,
+    ERR_FAT32_NAME_TOO_LONG,
+    ERR_FAT32_NAME_INVALID,
+    ERR_FAT32_UTF16_CONVERSION,
+    ERR_FAT32_LFN_CHECKSUM,
+    ERR_FAT32_TOO_MANY_LFN_ENTRIES,
+    ERR_FAT32_SFN_SUFFIX_OVERFLOW,
+	ERR_RESERVE_NOT_INIT,             // Резервный кластер не инициализирован
 } ErrorCode;
 
 /** Возвращает строковое описание кода ошибки. */
