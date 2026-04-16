@@ -5,11 +5,16 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define RESERVED_SLOT_SIZE 128
-#define RESERVED_NAME_SIZE 124
-#define RESERVED_FIELD_OFFSET 52
+// ==================== Константы для реестра ====================
+#define RESERVED_SLOT_SIZE        128     // размер одного слота
+#define RESERVED_NAME_SIZE        120     // максимальная длина имени (без нуля)
+#define RESERVED_NAME_MAX         121     // максимальная длина с нулём
+#define RESERVED_SIZE_OFFSET      120     // смещение поля размера файла
+#define RESERVED_CLUSTER_OFFSET   124     // смещение поля первого кластера
+#define RESERVED_FIELD_OFFSET     52      // смещение в BPB для кластера реестра
 
-// Получить номер резервного кластера из BPB
+// ==================== Работа с BPB ====================
+
 static ErrorCode get_reserve_cluster(Disk *disk, uint64_t start_lba, uint32_t *cluster) {
     uint8_t sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, start_lba * SECTOR_SIZE);
@@ -53,7 +58,8 @@ static ErrorCode set_boot_cluster(Disk *disk, uint64_t start_lba, uint32_t clust
     return err;
 }
 
-// Найти пустой слот
+// ==================== Вспомогательные функции ====================
+
 static int find_empty_slot(const uint8_t *cluster_data, uint32_t slots) {
     for (uint32_t i = 0; i < slots; i++) {
         const uint8_t *slot = cluster_data + i * RESERVED_SLOT_SIZE;
@@ -62,19 +68,19 @@ static int find_empty_slot(const uint8_t *cluster_data, uint32_t slots) {
     return -1;
 }
 
-// Проверка, что имя допустимо (ASCII, длина <= 123)
+// Проверка, что имя допустимо (ASCII, длина <= 120)
 static bool is_valid_name(const char *name) {
     size_t len = strlen(name);
-    if (len == 0 || len > RESERVED_NAME_SIZE - 1) return false;
+    if (len == 0 || len > RESERVED_NAME_SIZE) return false;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = name[i];
-        if (c < 0x20 || c > 0x7E) return false; // только печатные ASCII
+        if (c < 0x20 || c > 0x7E) return false;
     }
     return true;
 }
 
-// Получить первый кластер файла по пути (проверка, что это файл)
-static ErrorCode get_file_cluster(Disk *disk, const Fat32Info *info, const char *path, uint32_t *cluster, uint32_t *size) {
+static ErrorCode get_file_cluster(Disk *disk, const Fat32Info *info, const char *path,
+                                  uint32_t *cluster, uint32_t *size) {
     char *path_copy = my_strdup(path);
     if (!path_copy) return ERR_OUT_OF_MEMORY;
     char *last_slash = strrchr(path_copy, '/');
@@ -109,7 +115,7 @@ static ErrorCode get_file_cluster(Disk *disk, const Fat32Info *info, const char 
         free(path_copy);
         return err;
     }
-    
+
     int found = -1;
     for (uint32_t i = 0; i < entries; i++) {
         const uint8_t *entry = buffer + i * 32;
@@ -120,8 +126,8 @@ static ErrorCode get_file_cluster(Disk *disk, const Fat32Info *info, const char 
         if (se->attr & FAT32_ATTR_DIRECTORY) continue;
 
         char *long_name = extract_lfn_name(buffer, i);
-        const char *cmp;
         char sfn_name[13];
+        const char *cmp;
         if (long_name) {
             cmp = long_name;
         } else {
@@ -153,9 +159,7 @@ ErrorCode fat32_reserve_init(Disk *disk, uint64_t start_lba) {
     uint32_t existing;
     err = get_reserve_cluster(disk, start_lba, &existing);
     if (err != ERR_OK) return err;
-    if (existing != 0) {
-        return ERR_ALREADY_EXISTS;
-    }
+    if (existing != 0) return ERR_ALREADY_EXISTS;
 
     uint32_t cluster = fat32_alloc_cluster(disk, &info);
     if (cluster == 0) return ERR_NO_FREE_SPACE;
@@ -181,10 +185,7 @@ ErrorCode fat32_reserve_init(Disk *disk, uint64_t start_lba) {
 
     // При инициализации также обнуляем загрузочный кластер
     err = set_boot_cluster(disk, start_lba, 0);
-    if (err != ERR_OK) {
-        // не фатально, но сообщим
-        return err;
-    }
+    if (err != ERR_OK) return err;
 
     return ERR_OK;
 }
@@ -197,9 +198,7 @@ ErrorCode fat32_reserve_list(Disk *disk, uint64_t start_lba) {
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t boot_cluster = 0;
     get_boot_cluster(disk, start_lba, &boot_cluster);
@@ -220,8 +219,9 @@ ErrorCode fat32_reserve_list(Disk *disk, uint64_t start_lba) {
         const uint8_t *slot = buffer + i * RESERVED_SLOT_SIZE;
         const char *name = (const char*)slot;
         if (name[0] != '\0') {
-            uint32_t cl = *(uint32_t*)(slot + RESERVED_NAME_SIZE);
-            printf("  [%u] %s (cluster %u)%s\n", i, name, cl,
+            uint32_t size = *(uint32_t*)(slot + RESERVED_SIZE_OFFSET);
+            uint32_t cl = *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET);
+            printf("  [%u] %s (cluster %u, %u bytes)%s\n", i, name, cl, size,
                    (cl == boot_cluster) ? " *" : "");
         }
     }
@@ -229,13 +229,10 @@ ErrorCode fat32_reserve_list(Disk *disk, uint64_t start_lba) {
     return ERR_OK;
 }
 
-
 ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
     const char *fname = strrchr(path, '/');
     if (fname) fname++; else fname = path;
-    if (!is_valid_name(fname)) {
-        return ERR_FAT32_NAME_INVALID; // или ERR_INVALID_ARGUMENT
-    }
+    if (!is_valid_name(fname)) return ERR_FAT32_NAME_INVALID;
 
     Fat32Info info;
     ErrorCode err = fat32_get_info(disk, start_lba, &info);
@@ -244,9 +241,7 @@ ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t file_cluster, file_size;
     err = get_file_cluster(disk, &info, path, &file_cluster, &file_size);
@@ -267,7 +262,7 @@ ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
         const uint8_t *slot = buffer + i * RESERVED_SLOT_SIZE;
         const char *name = (const char*)slot;
         if (name[0] != '\0') {
-            uint32_t cl = *(uint32_t*)(slot + RESERVED_NAME_SIZE);
+            uint32_t cl = *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET);
             if (strcmp(name, fname) == 0) {
                 free(buffer);
                 return ERR_ALREADY_EXISTS;
@@ -287,8 +282,9 @@ ErrorCode fat32_reserve_add(Disk *disk, uint64_t start_lba, const char *path) {
 
     uint8_t *slot = buffer + empty * RESERVED_SLOT_SIZE;
     strncpy((char*)slot, fname, RESERVED_NAME_SIZE);
-    slot[RESERVED_NAME_SIZE - 1] = '\0';
-    *(uint32_t*)(slot + RESERVED_NAME_SIZE) = file_cluster;
+    slot[RESERVED_NAME_SIZE] = '\0';
+    *(uint32_t*)(slot + RESERVED_SIZE_OFFSET) = file_size;
+    *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET) = file_cluster;
 
     err = fat32_write_cluster(disk, &info, reserve_cluster, buffer);
     free(buffer);
@@ -305,9 +301,7 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
     uint32_t slots = cluster_size / RESERVED_SLOT_SIZE;
@@ -326,7 +320,7 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
         const uint8_t *slot = buffer + i * RESERVED_SLOT_SIZE;
         if (slot[0] != '\0' && strcmp((const char*)slot, name) == 0) {
             found = i;
-            found_cluster = *(uint32_t*)(slot + RESERVED_NAME_SIZE);
+            found_cluster = *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET);
             break;
         }
     }
@@ -341,7 +335,6 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
     get_boot_cluster(disk, start_lba, &boot_cluster);
     if (found_cluster == boot_cluster) {
         set_boot_cluster(disk, start_lba, 0);
-        // можно не выводить сообщение здесь; пусть команда сама решит
     }
 
     memset(buffer + found * RESERVED_SLOT_SIZE, 0, RESERVED_SLOT_SIZE);
@@ -350,7 +343,6 @@ ErrorCode fat32_reserve_remove(Disk *disk, uint64_t start_lba, const char *name)
     return err;
 }
 
-// fat32_reserve_clear
 ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba) {
     Fat32Info info;
     ErrorCode err = fat32_get_info(disk, start_lba, &info);
@@ -359,9 +351,7 @@ ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba) {
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
     uint8_t *zero = (uint8_t*)calloc(1, cluster_size);
@@ -376,7 +366,6 @@ ErrorCode fat32_reserve_clear(Disk *disk, uint64_t start_lba) {
     return ERR_OK;
 }
 
-
 ErrorCode fat32_reserve_dump(Disk *disk, uint64_t start_lba) {
     Fat32Info info;
     ErrorCode err = fat32_get_info(disk, start_lba, &info);
@@ -385,9 +374,7 @@ ErrorCode fat32_reserve_dump(Disk *disk, uint64_t start_lba) {
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
     uint8_t *buffer = (uint8_t*)malloc(cluster_size);
@@ -418,9 +405,7 @@ ErrorCode fat32_reserve_info(Disk *disk, uint64_t start_lba) {
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t boot_cluster;
     get_boot_cluster(disk, start_lba, &boot_cluster);
@@ -464,9 +449,7 @@ ErrorCode fat32_reserve_boot_set(Disk *disk, uint64_t start_lba, const char *nam
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
     uint32_t slots = cluster_size / RESERVED_SLOT_SIZE;
@@ -484,16 +467,14 @@ ErrorCode fat32_reserve_boot_set(Disk *disk, uint64_t start_lba, const char *nam
     for (uint32_t i = 0; i < slots; i++) {
         const uint8_t *slot = buffer + i * RESERVED_SLOT_SIZE;
         if (slot[0] != '\0' && strcmp((const char*)slot, name) == 0) {
-            found_cluster = *(uint32_t*)(slot + RESERVED_NAME_SIZE);
+            found_cluster = *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET);
             found = i;
             break;
         }
     }
     free(buffer);
 
-    if (found < 0) {
-        return ERR_NOT_FOUND;
-    }
+    if (found < 0) return ERR_NOT_FOUND;
 
     err = set_boot_cluster(disk, start_lba, found_cluster);
     if (err != ERR_OK) return err;
@@ -510,9 +491,7 @@ ErrorCode fat32_reserve_boot_show(Disk *disk, uint64_t start_lba) {
     uint32_t reserve_cluster;
     err = get_reserve_cluster(disk, start_lba, &reserve_cluster);
     if (err != ERR_OK) return err;
-    if (reserve_cluster == 0) {
-        return ERR_RESERVE_NOT_INIT;
-    }
+    if (reserve_cluster == 0) return ERR_RESERVE_NOT_INIT;
 
     uint32_t boot_cluster;
     err = get_boot_cluster(disk, start_lba, &boot_cluster);
@@ -537,7 +516,7 @@ ErrorCode fat32_reserve_boot_show(Disk *disk, uint64_t start_lba) {
     for (uint32_t i = 0; i < slots; i++) {
         const uint8_t *slot = buffer + i * RESERVED_SLOT_SIZE;
         if (slot[0] != '\0') {
-            uint32_t cl = *(uint32_t*)(slot + RESERVED_NAME_SIZE);
+            uint32_t cl = *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET);
             if (cl == boot_cluster) {
                 printf("Boot file: %s (cluster %u)\n", (const char*)slot, boot_cluster);
                 free(buffer);
