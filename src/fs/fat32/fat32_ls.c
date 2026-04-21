@@ -1,4 +1,5 @@
 #include "fat32.h"
+#include "output.h"
 #include "fat32_util.h"
 #include <stdlib.h>
 #include <string.h>
@@ -154,7 +155,7 @@ ErrorCode fat32_list_dir(Disk *disk, uint64_t start_lba, const char *path) {
     err = fat32_read_dir(disk, &info, dir_cluster, &dir_buffer, &entries_count);
     if (err != ERR_OK) return err;
 
-    printf("Directory listing of %s:\n", path);
+    svde_out("Directory listing of %s:\n", path);
     uint32_t count = 0;
     for (uint32_t i = 0; i < entries_count; i++) {
         const uint8_t *entry = dir_buffer + i * 32;
@@ -178,14 +179,14 @@ ErrorCode fat32_list_dir(Disk *disk, uint64_t start_lba, const char *path) {
 
         const char *type = (se->attr & FAT32_ATTR_DIRECTORY) ? "DIR" : "FILE";
         uint32_t first_cluster = ((uint32_t)se->first_cluster_hi << 16) | se->first_cluster_lo;
-        printf("  %s %10u bytes  cluster %u  %s\n",
+        svde_out("  %s %10u bytes  cluster %u  %s\n",
                type, se->file_size, first_cluster, display_name);
 
         free(long_name);
     }
 
     if (count == 0) {
-        printf("  (empty)\n");
+        svde_out("  (empty)\n");
     }
 
     free(dir_buffer);

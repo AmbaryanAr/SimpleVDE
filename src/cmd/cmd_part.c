@@ -1,3 +1,4 @@
+#include "output.h"
 #include "cmd_part.h"
 #include "partition.h"
 #include "cmd_common.h"
@@ -16,14 +17,14 @@ ErrorCode cmd_part_create(CMDArgs *args) {
     int part_index = parse_part_index(args->part);
     if (part_index < 0) {
         disk_close(&disk);
-        fprintf(stderr, "Invalid partition index: %s\n", args->part);
+        svde_err( "Invalid partition index: %s\n", args->part);
         return ERR_INVALID_ARGUMENT;
     }
 
     uint64_t size_bytes = 0;
     if (args->size) {
         if (!parse_size(args->size, &size_bytes)) {
-            fprintf(stderr, "Invalid size: %s\n", args->size);
+            svde_err( "Invalid size: %s\n", args->size);
             disk_close(&disk);
             return ERR_INVALID_ARGUMENT;
         }
@@ -33,10 +34,10 @@ ErrorCode cmd_part_create(CMDArgs *args) {
     err = partition_create(&disk, part_index, size_bytes, type_str);
     disk_close(&disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to create partition (error %d).\n", err);
+        svde_err( "Failed to create partition (error %d).\n", err);
         return err;
     }
-    printf("Partition %d created successfully.\n", part_index + 1);
+    svde_out("Partition %d created successfully.\n", part_index + 1);
     return ERR_OK;
 }
 
@@ -52,10 +53,10 @@ ErrorCode cmd_part_delete(CMDArgs *args) {
     err = partition_delete(&disk, part_index);
     disk_close(&disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to delete partition (error %d).\n", err);
+        svde_err( "Failed to delete partition (error %d).\n", err);
         return err;
     }
-    printf("Partition %d deleted successfully.\n", part_index + 1);
+    svde_out("Partition %d deleted successfully.\n", part_index + 1);
     return ERR_OK;
 }
 
@@ -71,10 +72,10 @@ ErrorCode cmd_part_set_type(CMDArgs *args) {
     err = partition_set_type(&disk, part_index, args->type);
     disk_close(&disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to set partition type (error %d).\n", err);
+        svde_err( "Failed to set partition type (error %d).\n", err);
         return err;
     }
-    printf("Partition %d type set to %s.\n", part_index + 1, args->type);
+    svde_out("Partition %d type set to %s.\n", part_index + 1, args->type);
     return ERR_OK;
 }
 
@@ -90,10 +91,10 @@ ErrorCode cmd_part_set_active(CMDArgs *args) {
     err = partition_set_active(&disk, part_index, true);
     disk_close(&disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to set partition active (error %d).\n", err);
+        svde_err( "Failed to set partition active (error %d).\n", err);
         return err;
     }
-    printf("Partition %d set active.\n", part_index + 1);
+    svde_out("Partition %d set active.\n", part_index + 1);
     return ERR_OK;
 }
 
@@ -109,9 +110,9 @@ ErrorCode cmd_part_set_inactive(CMDArgs *args) {
     err = partition_set_active(&disk, part_index, false);
     disk_close(&disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to set partition inactive (error %d).\n", err);
+        svde_err( "Failed to set partition inactive (error %d).\n", err);
         return err;
     }
-    printf("Partition %d set inactive.\n", part_index + 1);
+    svde_out("Partition %d set inactive.\n", part_index + 1);
     return ERR_OK;
 }

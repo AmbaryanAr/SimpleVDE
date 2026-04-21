@@ -1,4 +1,5 @@
 #include "cmd_fs.h"
+#include "output.h"
 #include "cmd_common.h"
 #include "fat32_util.h"
 
@@ -15,7 +16,7 @@ typedef struct {
 
 static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
                        const char *name, const char *prefix, int is_last) {
-    printf("%s%s%s\n", prefix, (is_last ? "'-- " : "|-- "), name);
+    svde_out("%s%s%s\n", prefix, (is_last ? "'-- " : "|-- "), name);
 
     uint8_t *buffer = NULL;
     uint32_t entries = 0;
@@ -117,7 +118,7 @@ ErrorCode cmd_fs_mkdir(CMDArgs *args) {
         return err;
     }
 
-    printf("Directory '%s' created successfully.\n", args->path);
+    svde_out("Directory '%s' created successfully.\n", args->path);
     disk_close(&disk);
     return ERR_OK;
 }
@@ -135,24 +136,24 @@ ErrorCode cmd_fs_copy(CMDArgs *args) {
     if (err != ERR_OK) {
         print_error(err, "cannot copy file");
         if (err == ERR_INVALID_ARGUMENT) {
-            fprintf(stderr, "Note: Destination path must be absolute, e.g., /dir/file.txt\n");
+            svde_err( "Note: Destination path must be absolute, e.g., /dir/file.txt\n");
         } else if (err == ERR_NOT_FOUND) {
-            fprintf(stderr, "Note: Check that source file exists and is readable.\n");
+            svde_err( "Note: Check that source file exists and is readable.\n");
         } else if (err == ERR_ALREADY_EXISTS) {
-            fprintf(stderr, "Note: A file with the same name already exists.\n");
+            svde_err( "Note: A file with the same name already exists.\n");
         }
         disk_close(&disk);
         return err;
     }
 
-    printf("File '%s' copied to '%s' successfully.\n", args->src, args->dest);
+    svde_out("File '%s' copied to '%s' successfully.\n", args->src, args->dest);
     disk_close(&disk);
     return ERR_OK;
 }
 
 ErrorCode cmd_fs_rm(CMDArgs *args) {
     if (strcmp(args->path, "/") == 0) {
-        fprintf(stderr, "Error: cannot delete root directory.\n");
+        svde_err( "Error: cannot delete root directory.\n");
         return ERR_INVALID_ARGUMENT;
     }
 
@@ -168,20 +169,20 @@ ErrorCode cmd_fs_rm(CMDArgs *args) {
     if (err != ERR_OK) {
         print_error(err, "cannot delete file");
         if (err == ERR_INVALID_ARGUMENT) {
-            fprintf(stderr, "Note: Path must be absolute and point to a file, not a directory.\n");
+            svde_err( "Note: Path must be absolute and point to a file, not a directory.\n");
         }
         disk_close(&disk);
         return err;
     }
 
-    printf("File '%s' deleted successfully.\n", args->path);
+    svde_out("File '%s' deleted successfully.\n", args->path);
     disk_close(&disk);
     return ERR_OK;
 }
 
 ErrorCode cmd_fs_rmdir(CMDArgs *args) {
     if (strcmp(args->path, "/") == 0) {
-        fprintf(stderr, "Error: cannot remove root directory.\n");
+        svde_err( "Error: cannot remove root directory.\n");
         return ERR_INVALID_ARGUMENT;
     }
 
@@ -197,15 +198,15 @@ ErrorCode cmd_fs_rmdir(CMDArgs *args) {
     if (err != ERR_OK) {
         print_error(err, "cannot remove directory");
         if (err == ERR_INVALID_ARGUMENT) {
-            fprintf(stderr, "Note: Path must be absolute and point to a directory.\n");
+            svde_err( "Note: Path must be absolute and point to a directory.\n");
         } else if (err == ERR_DIR_NOT_EMPTY) {
-            fprintf(stderr, "Note: Directory is not empty.\n");
+            svde_err( "Note: Directory is not empty.\n");
         }
         disk_close(&disk);
         return err;
     }
 
-    printf("Directory '%s' removed successfully.\n", args->path);
+    svde_out("Directory '%s' removed successfully.\n", args->path);
     disk_close(&disk);
     return ERR_OK;
 }
@@ -231,7 +232,7 @@ ErrorCode cmd_fs_tree(CMDArgs *args) {
         start_name = args->path;
     }
 
-    printf("Directory tree of %s:\n", start_name);
+    svde_out("Directory tree of %s:\n", start_name);
     print_tree(&disk, &info, start_cluster, start_name, "", 1);
 
     disk_close(&disk);
@@ -254,7 +255,7 @@ ErrorCode cmd_fs_reserve_init(CMDArgs *args) {
         return err;
     }
 
-    printf("Reserve cluster initialized successfully.\n");
+    svde_out("Reserve cluster initialized successfully.\n");
     disk_close(&disk);
     return ERR_OK;
 }
@@ -289,7 +290,7 @@ ErrorCode cmd_fs_reserve_add(CMDArgs *args) {
         return err;
     }
 
-    printf("Entry added to reserve successfully.\n");
+    svde_out("Entry added to reserve successfully.\n");
     disk_close(&disk);
     return ERR_OK;
 }
@@ -310,7 +311,7 @@ ErrorCode cmd_fs_reserve_rm(CMDArgs *args) {
         return err;
     }
 
-    printf("Entry removed from reserve successfully.\n");
+    svde_out("Entry removed from reserve successfully.\n");
     disk_close(&disk);
     return ERR_OK;
 }
@@ -331,7 +332,7 @@ ErrorCode cmd_fs_reserve_clear(CMDArgs *args) {
         return err;
     }
 
-    printf("Reserve cleared successfully.\n");
+    svde_out("Reserve cleared successfully.\n");
     disk_close(&disk);
     return ERR_OK;
 }

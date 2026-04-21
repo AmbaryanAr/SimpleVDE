@@ -1,6 +1,7 @@
 #include "mbr.h"
 #include "gpt.h"
 #include "utils.h"
+#include "output.h"
 #include "partition.h"
 
 #include <stdio.h>
@@ -183,7 +184,7 @@ ErrorCode partition_get_info(Disk *disk, int part_index, uint64_t *start_lba, ui
 void partition_print_info(Disk *disk) {
     PartitionTableType table_type;
     if (partition_detect_type(disk, &table_type) != ERR_OK) {
-        printf("Failed to detect partition table.\n");
+        svde_out("Failed to detect partition table.\n");
         return;
     }
     if (table_type == PT_MBR) {
@@ -191,6 +192,6 @@ void partition_print_info(Disk *disk) {
     } else if (table_type == PT_GPT) {
         gpt_print_info(disk);
     } else {
-        printf("No valid partition table found.\n");
+        svde_out("No valid partition table found.\n");
     }
 }

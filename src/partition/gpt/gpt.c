@@ -1,6 +1,7 @@
 #include "gpt.h"
 #include "mbr.h"
 #include "utils.h"
+#include "output.h"
 
 #include <time.h>
 #include <ctype.h>
@@ -510,27 +511,27 @@ ErrorCode gpt_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uin
 
 void gpt_print_info(Disk *disk) {
     if (!disk || !disk->is_open) {
-        printf("Disk not open.\n");
+        svde_out("Disk not open.\n");
         return;
     }
 
     GptHeader header;
     if (disk_read(disk, &header, sizeof(header), 1 * SECTOR_SIZE) != ERR_OK) {
-        printf("Failed to read GPT header.\n");
+        svde_out("Failed to read GPT header.\n");
         return;
     }
     if (memcmp(header.signature, GPT_SIGNATURE, 8) != 0) {
-        printf("Invalid GPT signature.\n");
+        svde_out("Invalid GPT signature.\n");
         return;
     }
 
     char disk_guid_str[37];
     gpt_guid_to_string(header.disk_guid, disk_guid_str);
-    printf("GPT: revision %u.%u, disk GUID %s\n",
+    svde_out("GPT: revision %u.%u, disk GUID %s\n",
            header.revision >> 16, header.revision & 0xFFFF, disk_guid_str);
-    printf("First usable LBA: %" PRIu64 ", last usable LBA: %" PRIu64 "\n",
+    svde_out("First usable LBA: %" PRIu64 ", last usable LBA: %" PRIu64 "\n",
            header.first_usable_lba, header.last_usable_lba);
-    printf("Number of partition entries: %u\n", header.num_partition_entries);
+    svde_out("Number of partition entries: %u\n", header.num_partition_entries);
 
     size_t table_size = header.num_partition_entries * header.partition_entry_size;
     uint32_t sectors_per_table = (uint32_t)((table_size + SECTOR_SIZE - 1) / SECTOR_SIZE);
@@ -538,21 +539,21 @@ void gpt_print_info(Disk *disk) {
 
     GptPartitionEntry *partitions = (GptPartitionEntry*)malloc(table_size);
     if (!partitions) {
-        printf("Out of memory.\n");
+        svde_out("Out of memory.\n");
         return;
     }
 
     for (uint32_t i = 0; i < sectors_per_table; i++) {
         if (disk_read(disk, (uint8_t*)partitions + i * SECTOR_SIZE, SECTOR_SIZE,
                       (table_lba + i) * SECTOR_SIZE) != ERR_OK) {
-            printf("Failed to read partition table.\n");
+            svde_out("Failed to read partition table.\n");
             free(partitions);
             return;
         }
     }
 
-    printf("\nPartitions:\n");
-    printf("--------------------------------------------------------\n");
+    svde_out("\nPartitions:\n");
+    svde_out("--------------------------------------------------------\n");
     int count = 0;
     for (uint32_t i = 0; i < header.num_partition_entries; i++) {
         if (!is_partition_empty(&partitions[i])) {
@@ -567,15 +568,15 @@ void gpt_print_info(Disk *disk) {
                 uint16_t wc = partitions[i].partition_name[j];
                 name_ascii[j] = (wc < 0x80) ? (char)wc : '?';
             }
-            printf("Part %u: %s\n", i + 1, name_ascii);
-            printf("  Type GUID: %s\n", type_guid_str);
-            printf("  Part GUID: %s\n", part_guid_str);
-            printf("  LBA: %" PRIu64 " - %" PRIu64 " (%" PRIu64 " MB)\n",
+            svde_out("Part %u: %s\n", i + 1, name_ascii);
+            svde_out("  Type GUID: %s\n", type_guid_str);
+            svde_out("  Part GUID: %s\n", part_guid_str);
+            svde_out("  LBA: %" PRIu64 " - %" PRIu64 " (%" PRIu64 " MB)\n",
                    partitions[i].first_lba, partitions[i].last_lba, size_mb);
         }
     }
     if (count == 0) {
-        printf("(no partitions)\n");
+        svde_out("(no partitions)\n");
     }
     free(partitions);
 }

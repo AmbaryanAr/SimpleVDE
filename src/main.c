@@ -3,6 +3,7 @@
 #include "utils.h"
 #include "shell.h"
 #include "cmd_fs.h"
+#include "output.h"
 #include "cmd_disk.h"
 #include "cmd_part.h"
 #include "cmd_format.h"
@@ -17,7 +18,7 @@
 #define CHECK_ARG(field, name) \
     do { \
         if (!(field)) { \
-            fprintf(stderr, "Error: missing -%s= parameter.\n", name); \
+            svde_err( "Error: missing -%s= parameter.\n", name); \
             return 1; \
         } \
     } while (0)
@@ -33,7 +34,7 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
             if (args->category && args->command == NULL) {
                 args->command = arg;
             } else {
-                fprintf(stderr, "Warning: unexpected argument '%s' ignored.\n", arg);
+                svde_err( "Warning: unexpected argument '%s' ignored.\n", arg);
             }
             continue;
         }
@@ -70,13 +71,13 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
             } else if (strcmp(key, "fs") == 0) {
                 args->fs = value;
             } else {
-                fprintf(stderr, "Warning: unknown parameter -%s ignored.\n", key);
+                svde_err( "Warning: unknown parameter -%s ignored.\n", key);
             }
 
             *eq = '=';
         } else {
             if (arg[0] != '-' || arg[1] != '-') {
-                fprintf(stderr, "Warning: unexpected argument '%s' ignored.\n", arg);
+                svde_err( "Warning: unexpected argument '%s' ignored.\n", arg);
                 continue;
             }
 
@@ -93,8 +94,8 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
     }
 
     if (!args->category) {
-        fprintf(stderr, "Error: no command specified.\n");
-        fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
+        svde_err( "Error: no command specified.\n");
+        svde_err( "Try '%s --help' for more information.\n", argv[0]);
         exit(1);
     }
 }
@@ -152,7 +153,7 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.count, "count");
             err = cmd_disk_read_s(&args);
         } else {
-            fprintf(stderr, "Error: unknown disk command '%s'.\n", args.command);
+            svde_err( "Error: unknown disk command '%s'.\n", args.command);
             return 1;
         }
     } else if (strcmp(cat, "part") == 0) {
@@ -178,7 +179,7 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.part, "part");
             err = cmd_part_set_inactive(&args);
         } else {
-            fprintf(stderr, "Error: unknown partition command '%s'.\n", args.command);
+            svde_err( "Error: unknown partition command '%s'.\n", args.command);
             return 1;
         }
     } else if (strcmp(cat, "format") == 0) {
@@ -260,7 +261,7 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.part, "part");
             err = cmd_fs_reserve_boot_clear(&args);
         } else {
-            fprintf(stderr, "Error: unknown fs command '%s'.\n", args.command);
+            svde_err( "Error: unknown fs command '%s'.\n", args.command);
             return 1;
         }
     } else if (strcmp(cat, "shell") == 0) {
@@ -274,7 +275,7 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.src, "src");
             err = cmd_mbr_write(&args);
         } else {
-            fprintf(stderr, "Error: unknown mbr command '%s'.\n", args.command);
+            svde_err( "Error: unknown mbr command '%s'.\n", args.command);
             return 1;
         }
     } else if (strcmp(cat, "bpb") == 0) {
@@ -284,17 +285,17 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.src, "src");
             err = cmd_bpb_write(&args);
         } else {
-            fprintf(stderr, "Error: unknown bpb command '%s'.\n", args.command);
+            svde_err( "Error: unknown bpb command '%s'.\n", args.command);
             return 1;
         }
     } else {
-        fprintf(stderr, "Error: unknown command category '%s'.\n", args.category);
-        fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
+        svde_err( "Error: unknown command category '%s'.\n", args.category);
+        svde_err( "Try '%s --help' for more information.\n", argv[0]);
         return 1;
     }
 
     if (err != ERR_OK) {
-        fprintf(stderr, "Command failed with error code: %d\n", err);
+        svde_err( "Command failed with error code: %d\n", err);
         return 1;
     }
     return 0;

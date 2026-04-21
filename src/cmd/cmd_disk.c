@@ -1,5 +1,6 @@
 #include "fat32.h"
 #include "utils.h"
+#include "output.h"
 #include "cmd_disk.h"
 #include "partition.h"
 #include "cmd_common.h"
@@ -11,7 +12,7 @@
 
 static ErrorCode disk_read_and_dump(Disk *disk, uint64_t offset_bytes, uint64_t count_bytes) {
     if (offset_bytes + count_bytes > disk->size) {
-        fprintf(stderr, "Read range exceeds disk size.\n");
+        svde_err( "Read range exceeds disk size.\n");
         return ERR_DISK_READ;
     }
 
@@ -22,12 +23,12 @@ static ErrorCode disk_read_and_dump(Disk *disk, uint64_t offset_bytes, uint64_t 
 
     ErrorCode err = disk_read(disk, buffer, count_bytes, offset_bytes);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to read from disk.\n");
+        svde_err( "Failed to read from disk.\n");
         free(buffer);
         return err;
     }
 
-    printf("Read %" PRIu64 " bytes from offset %" PRIu64 ":\n", count_bytes, offset_bytes);
+    svde_out("Read %" PRIu64 " bytes from offset %" PRIu64 ":\n", count_bytes, offset_bytes);
     for (uint64_t i = 0; i < count_bytes; i += 16) {
         printf("%016" PRIx64 ": ", offset_bytes + i);
         uint64_t line_len = count_bytes - i;
@@ -62,14 +63,14 @@ static ErrorCode disk_read_and_dump(Disk *disk, uint64_t offset_bytes, uint64_t 
 ErrorCode cmd_disk_create(CMDArgs *args) {
     uint64_t size_bytes;
     if (!parse_size(args->size, &size_bytes)) {
-        fprintf(stderr, "Error: invalid size format: %s\n", args->size);
+        svde_err( "Error: invalid size format: %s\n", args->size);
         return ERR_INVALID_ARGUMENT;
     }
 
     Disk disk;
     ErrorCode err = disk_create(args->file, size_bytes, &disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to create disk image: %s\n", args->file);
+        svde_err( "Failed to create disk image: %s\n", args->file);
         return err;
     }
 
@@ -80,20 +81,20 @@ ErrorCode cmd_disk_create(CMDArgs *args) {
         } else if (strcmp(args->table, "gpt") == 0) {
             table_type = PT_GPT;
         } else {
-            fprintf(stderr, "Error: unknown partition table type: %s\n", args->table);
+            svde_err( "Error: unknown partition table type: %s\n", args->table);
             disk_close(&disk);
             return ERR_INVALID_ARGUMENT;
         }
         err = partition_create_table(&disk, table_type);
         if (err != ERR_OK) {
-            fprintf(stderr, "Failed to create partition table: %s\n", args->table);
+            svde_err( "Failed to create partition table: %s\n", args->table);
             disk_close(&disk);
             return err;
         }
     }
 
     disk_close(&disk);
-    printf("Disk image '%s' created successfully (%" PRIu64 " bytes).\n", args->file, size_bytes);
+    svde_out("Disk image '%s' created successfully (%" PRIu64 " bytes).\n", args->file, size_bytes);
     return ERR_OK;
 }
 
@@ -101,12 +102,12 @@ ErrorCode cmd_disk_info(CMDArgs *args) {
     Disk disk;
     ErrorCode err = disk_open(args->file, &disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to open disk image: %s\n", args->file);
+        svde_err( "Failed to open disk image: %s\n", args->file);
         return err;
     }
 
-    printf("Disk: %s\n", disk.path);
-    printf("Size: %" PRIu64 " bytes (%.2f MB)\n", disk.size, disk.size / (1024.0 * 1024.0));
+    svde_out("Disk: %s\n", disk.path);
+    svde_out("Size: %" PRIu64 " bytes (%.2f MB)\n", disk.size, disk.size / (1024.0 * 1024.0));
 
     PartitionTableType table_type;
     err = partition_detect_type(&disk, &table_type);
@@ -117,14 +118,14 @@ ErrorCode cmd_disk_info(CMDArgs *args) {
         } else if (table_type == PT_GPT) {
             type_str = "GPT";
         }
-        printf("Partition table: %s\n", type_str);
+        svde_out("Partition table: %s\n", type_str);
         if (table_type != PT_UNKNOWN) {
             partition_print_info(&disk);
         } else {
-            printf("No valid partition table found.\n");
+            svde_out("No valid partition table found.\n");
         }
     } else {
-        printf("Failed to detect partition table (error %d).\n", err);
+        svde_out("Failed to detect partition table (error %d).\n", err);
     }
 
     disk_close(&disk);
@@ -135,18 +136,18 @@ ErrorCode cmd_disk_read(CMDArgs *args) {
     Disk disk;
     ErrorCode err = disk_open(args->file, &disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to open disk image: %s\n", args->file);
+        svde_err( "Failed to open disk image: %s\n", args->file);
         return err;
     }
 
     uint64_t offset, count;
     if (!parse_size(args->offset, &offset)) {
-        fprintf(stderr, "Invalid offset: %s\n", args->offset);
+        svde_err( "Invalid offset: %s\n", args->offset);
         disk_close(&disk);
         return ERR_INVALID_ARGUMENT;
     }
     if (!parse_size(args->count, &count)) {
-        fprintf(stderr, "Invalid count: %s\n", args->count);
+        svde_err( "Invalid count: %s\n", args->count);
         disk_close(&disk);
         return ERR_INVALID_ARGUMENT;
     }
@@ -160,18 +161,18 @@ ErrorCode cmd_disk_read_s(CMDArgs *args) {
     Disk disk;
     ErrorCode err = disk_open(args->file, &disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Failed to open disk image: %s\n", args->file);
+        svde_err( "Failed to open disk image: %s\n", args->file);
         return err;
     }
 
     uint64_t offset_sectors, count_sectors;
     if (!parse_integer(args->offset, &offset_sectors)) {
-        fprintf(stderr, "Invalid offset (sectors): %s\n", args->offset);
+        svde_err( "Invalid offset (sectors): %s\n", args->offset);
         disk_close(&disk);
         return ERR_INVALID_ARGUMENT;
     }
     if (!parse_integer(args->count, &count_sectors)) {
-        fprintf(stderr, "Invalid count (sectors): %s\n", args->count);
+        svde_err( "Invalid count (sectors): %s\n", args->count);
         disk_close(&disk);
         return ERR_INVALID_ARGUMENT;
     }
@@ -189,13 +190,13 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
     size_t code_size = 0;
     ErrorCode err = read_whole_file(args->src, &code_buf, &code_size);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: cannot read source file '%s'.\n", args->src);
+        svde_err( "Error: cannot read source file '%s'.\n", args->src);
         return err;
     }
 
     if (code_size == 0) {
         free(code_buf);
-        fprintf(stderr, "Error: source file is empty.\n");
+        svde_err( "Error: source file is empty.\n");
         return ERR_INVALID_ARGUMENT;
     }
 
@@ -203,7 +204,7 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
     err = disk_open(args->file, &disk);
     if (err != ERR_OK) {
         free(code_buf);
-        fprintf(stderr, "Failed to open disk image: %s\n", args->file);
+        svde_err( "Failed to open disk image: %s\n", args->file);
         return err;
     }
 
@@ -212,17 +213,17 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
     if (err != ERR_OK) {
         free(code_buf);
         disk_close(&disk);
-        fprintf(stderr, "Failed to read MBR.\n");
+        svde_err( "Failed to read MBR.\n");
         return err;
     }
 
     if (mbr[510] != 0x55 || mbr[511] != 0xAA) {
-        fprintf(stderr, "Warning: MBR signature not found, but will write anyway.\n");
+        svde_err( "Warning: MBR signature not found, but will write anyway.\n");
     }
 
     size_t write_size = (code_size < 446) ? code_size : 446;
     if (code_size > 446) {
-        fprintf(stderr, "Warning: source file is larger than 446 bytes. Only first 446 bytes will be written.\n");
+        svde_err( "Warning: source file is larger than 446 bytes. Only first 446 bytes will be written.\n");
     }
 
     memcpy(mbr, code_buf, write_size);
@@ -231,11 +232,11 @@ ErrorCode cmd_mbr_write(CMDArgs *args) {
     if (err != ERR_OK) {
         free(code_buf);
         disk_close(&disk);
-        fprintf(stderr, "Failed to write MBR.\n");
+        svde_err( "Failed to write MBR.\n");
         return err;
     }
 
-    printf("Successfully wrote %zu bytes to MBR (first 446 bytes of sector 0).\n", write_size);
+    svde_out("Successfully wrote %zu bytes to MBR (first 446 bytes of sector 0).\n", write_size);
     free(code_buf);
     disk_close(&disk);
     return ERR_OK;
@@ -246,13 +247,13 @@ ErrorCode cmd_bpb_write(CMDArgs *args) {
     size_t code_size = 0;
     ErrorCode err = read_whole_file(args->src, &code_buf, &code_size);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: cannot read source file '%s'.\n", args->src);
+        svde_err( "Error: cannot read source file '%s'.\n", args->src);
         return err;
     }
 
     if (code_size == 0) {
         free(code_buf);
-        fprintf(stderr, "Error: source file is empty.\n");
+        svde_err( "Error: source file is empty.\n");
         return ERR_INVALID_ARGUMENT;
     }
 
@@ -269,7 +270,7 @@ ErrorCode cmd_bpb_write(CMDArgs *args) {
     if (err != ERR_OK) {
         disk_close(&disk);
         free(code_buf);
-        fprintf(stderr, "Partition %s is not a valid FAT32 filesystem.\n", args->part);
+        svde_err( "Partition %s is not a valid FAT32 filesystem.\n", args->part);
         return ERR_INVALID_SIGNATURE;
     }
 
@@ -278,7 +279,7 @@ ErrorCode cmd_bpb_write(CMDArgs *args) {
     if (err != ERR_OK) {
         disk_close(&disk);
         free(code_buf);
-        fprintf(stderr, "Failed to read BPB sector at LBA %" PRIu64 ".\n", start_lba);
+        svde_err( "Failed to read BPB sector at LBA %" PRIu64 ".\n", start_lba);
         return err;
     }
 
@@ -286,7 +287,7 @@ ErrorCode cmd_bpb_write(CMDArgs *args) {
     const uint32_t max_code_size = 512 - code_offset - 2;
 
     if (code_size > max_code_size) {
-        fprintf(stderr, "Warning: source file is larger than available space (%u bytes). Only first %u bytes will be written.\n", max_code_size, max_code_size);
+        svde_err( "Warning: source file is larger than available space (%u bytes). Only first %u bytes will be written.\n", max_code_size, max_code_size);
         code_size = max_code_size;
     }
 
@@ -296,16 +297,16 @@ ErrorCode cmd_bpb_write(CMDArgs *args) {
     if (err != ERR_OK) {
         disk_close(&disk);
         free(code_buf);
-        fprintf(stderr, "Failed to write BPB sector at LBA %" PRIu64 ".\n", start_lba);
+        svde_err( "Failed to write BPB sector at LBA %" PRIu64 ".\n", start_lba);
         return err;
     }
 
     err = disk_write(&disk, sector, 512, (start_lba + 6) * 512);
     if (err != ERR_OK) {
-        fprintf(stderr, "Warning: failed to write backup BPB sector.\n");
+        svde_err( "Warning: failed to write backup BPB sector.\n");
     }
 
-    printf("Successfully wrote %zu bytes of boot code to partition %s BPB (LBA %" PRIu64 ", offset %u).\n",
+    svde_out("Successfully wrote %zu bytes of boot code to partition %s BPB (LBA %" PRIu64 ", offset %u).\n",
            code_size, args->part, start_lba, code_offset);
 
     free(code_buf);

@@ -1,4 +1,5 @@
 #include "fat32.h"
+#include "output.h"
 #include "fat32_util.h"
 #include <stdio.h>
 #include <ctype.h>
@@ -214,14 +215,14 @@ ErrorCode fat32_reserve_list(Disk *disk, uint64_t start_lba) {
         return err;
     }
 
-    printf("Reserve cluster %u (%u bytes, %u slots):\n", reserve_cluster, cluster_size, slots);
+    svde_out("Reserve cluster %u (%u bytes, %u slots):\n", reserve_cluster, cluster_size, slots);
     for (uint32_t i = 0; i < slots; i++) {
         const uint8_t *slot = buffer + i * RESERVED_SLOT_SIZE;
         const char *name = (const char*)slot;
         if (name[0] != '\0') {
             uint32_t size = *(uint32_t*)(slot + RESERVED_SIZE_OFFSET);
             uint32_t cl = *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET);
-            printf("  [%u] %s (cluster %u, %u bytes)%s\n", i, name, cl, size,
+            svde_out("  [%u] %s (cluster %u, %u bytes)%s\n", i, name, cl, size,
                    (cl == boot_cluster) ? " *" : "");
         }
     }
@@ -386,7 +387,7 @@ ErrorCode fat32_reserve_dump(Disk *disk, uint64_t start_lba) {
         return err;
     }
 
-    printf("Reserve cluster %u dump (%u bytes):\n", reserve_cluster, cluster_size);
+    svde_out("Reserve cluster %u dump (%u bytes):\n", reserve_cluster, cluster_size);
     for (uint32_t i = 0; i < cluster_size; i++) {
         if (i % 16 == 0) printf("%08x: ", i);
         printf("%02x ", buffer[i]);
@@ -427,13 +428,13 @@ ErrorCode fat32_reserve_info(Disk *disk, uint64_t start_lba) {
     }
     free(buffer);
 
-    printf("Reserve cluster: %u\n", reserve_cluster);
-    printf("Boot cluster: %u\n", boot_cluster);
-    printf("Cluster size: %u bytes\n", cluster_size);
-    printf("Slot size: %u bytes\n", RESERVED_SLOT_SIZE);
-    printf("Total slots: %u\n", slots);
-    printf("Used slots: %u\n", used);
-    printf("Free slots: %u\n", slots - used);
+    svde_out("Reserve cluster: %u\n", reserve_cluster);
+    svde_out("Boot cluster: %u\n", boot_cluster);
+    svde_out("Cluster size: %u bytes\n", cluster_size);
+    svde_out("Slot size: %u bytes\n", RESERVED_SLOT_SIZE);
+    svde_out("Total slots: %u\n", slots);
+    svde_out("Used slots: %u\n", used);
+    svde_out("Free slots: %u\n", slots - used);
     return ERR_OK;
 }
 
@@ -479,7 +480,7 @@ ErrorCode fat32_reserve_boot_set(Disk *disk, uint64_t start_lba, const char *nam
     err = set_boot_cluster(disk, start_lba, found_cluster);
     if (err != ERR_OK) return err;
 
-    printf("File '%s' (cluster %u) set as boot entry.\n", name, found_cluster);
+    svde_out("File '%s' (cluster %u) set as boot entry.\n", name, found_cluster);
     return ERR_OK;
 }
 
@@ -497,7 +498,7 @@ ErrorCode fat32_reserve_boot_show(Disk *disk, uint64_t start_lba) {
     err = get_boot_cluster(disk, start_lba, &boot_cluster);
     if (err != ERR_OK) return err;
     if (boot_cluster == 0) {
-        printf("No boot file set.\n");
+        svde_out("No boot file set.\n");
         return ERR_OK;
     }
 
@@ -518,14 +519,14 @@ ErrorCode fat32_reserve_boot_show(Disk *disk, uint64_t start_lba) {
         if (slot[0] != '\0') {
             uint32_t cl = *(uint32_t*)(slot + RESERVED_CLUSTER_OFFSET);
             if (cl == boot_cluster) {
-                printf("Boot file: %s (cluster %u)\n", (const char*)slot, boot_cluster);
+                svde_out("Boot file: %s (cluster %u)\n", (const char*)slot, boot_cluster);
                 free(buffer);
                 return ERR_OK;
             }
         }
     }
     free(buffer);
-    printf("Boot file cluster %u not found in reserve.\n", boot_cluster);
+    svde_out("Boot file cluster %u not found in reserve.\n", boot_cluster);
     return ERR_OK;
 }
 

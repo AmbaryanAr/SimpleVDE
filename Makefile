@@ -7,6 +7,7 @@ OBJDIR = obj
 # Все исходные файлы
 SOURCES = $(SRCDIR)/main.c \
           $(SRCDIR)/utils.c \
+          $(SRCDIR)/output.c \
           $(SRCDIR)/error_codes.c \
           $(SRCDIR)/partition/partition.c \
           $(wildcard $(SRCDIR)/cmd/*.c) \

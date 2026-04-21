@@ -1,5 +1,6 @@
 #include "mbr.h"
 #include "utils.h"
+#include "output.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -227,13 +228,13 @@ ErrorCode mbr_get_partition_info(Disk *disk, int index, uint64_t *start_lba, uin
 
 void mbr_print_info(Disk *disk) {
     if (!disk || !disk->is_open) {
-        printf("Disk not open.\n");
+        svde_out("Disk not open.\n");
         return;
     }
 
     MbrSector mbr;
     if (mbr_read(disk, &mbr) != ERR_OK) {
-        printf("Failed to read MBR.\n");
+        svde_out("Failed to read MBR.\n");
         return;
     }
 
@@ -243,11 +244,11 @@ void mbr_print_info(Disk *disk) {
             count++;
         }
     }
-    printf("MBR: %d primary partition(s)\n", count);
+    svde_out("MBR: %d primary partition(s)\n", count);
     for (int i = 0; i < 4; i++) {
         if (!is_partition_empty(&mbr.partitions[i])) {
             MbrPartitionEntry *p = &mbr.partitions[i];
-            printf("  Part %d: type=0x%02X, %s, LBA start=%u, size=%u sectors\n",
+            svde_out("  Part %d: type=0x%02X, %s, LBA start=%u, size=%u sectors\n",
                    i + 1, p->partition_type,
                    (p->boot_flag == 0x80) ? "active" : "inactive",
                    p->lba_start, p->sector_count);

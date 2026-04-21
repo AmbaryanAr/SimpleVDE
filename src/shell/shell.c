@@ -2,6 +2,7 @@
 #include "shell.h"
 #include "fat32.h"
 #include "utils.h"
+#include "output.h"
 #include "partition.h"
 #include "fat32_util.h"
 #include "cmd_common.h"
@@ -44,7 +45,7 @@ static ErrorCode shell_init(const char *file, const char *part) {
 
     ErrorCode err = disk_open(file, &shell_state.disk);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: cannot open disk image: %s\n", file);
+        svde_err( "Error: cannot open disk image: %s\n", file);
         return err;
     }
 
@@ -52,14 +53,14 @@ static ErrorCode shell_init(const char *file, const char *part) {
     err = partition_detect_type(&shell_state.disk, &table_type);
     if (err != ERR_OK || table_type == PT_UNKNOWN) {
         disk_close(&shell_state.disk);
-        fprintf(stderr, "Error: invalid partition table.\n");
+        svde_err( "Error: invalid partition table.\n");
         return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
     }
 
     int part_index = parse_part_index(part);
     if (part_index < 0) {
         disk_close(&shell_state.disk);
-        fprintf(stderr, "Error: invalid partition number '%s'.\n", part);
+        svde_err( "Error: invalid partition number '%s'.\n", part);
         return ERR_INVALID_ARGUMENT;
     }
 
@@ -68,9 +69,9 @@ static ErrorCode shell_init(const char *file, const char *part) {
     if (err != ERR_OK) {
         disk_close(&shell_state.disk);
         if (err == ERR_NOT_FOUND) {
-            fprintf(stderr, "Error: partition %d does not exist.\n", part_index + 1);
+            svde_err( "Error: partition %d does not exist.\n", part_index + 1);
         } else {
-            fprintf(stderr, "Error: cannot get partition info.\n");
+            svde_err( "Error: cannot get partition info.\n");
         }
         return err;
     }
@@ -78,7 +79,7 @@ static ErrorCode shell_init(const char *file, const char *part) {
     err = fat32_get_info(&shell_state.disk, shell_state.start_lba, &shell_state.info);
     if (err != ERR_OK) {
         disk_close(&shell_state.disk);
-        fprintf(stderr, "Error: partition %d is not a valid FAT32 filesystem.\n", part_index + 1);
+        svde_err( "Error: partition %d is not a valid FAT32 filesystem.\n", part_index + 1);
         return ERR_INVALID_SIGNATURE;
     }
 
@@ -205,41 +206,41 @@ static int parse_line(char *line, char **argv, int max_args) {
 }
 
 static void print_help(void) {
-    printf("Available commands:\n");
-    printf("  ls [path]                 - list directory contents\n");
-    printf("  cd [path]                 - change current directory (default: root)\n");
-    printf("  pwd                       - print current directory\n");
-    printf("  mkdir <path>              - create directory\n");
-    printf("  rmdir <path>              - remove empty directory\n");
-    printf("  rm <path>                 - delete file\n");
-    printf("  copy <host-file> <dest>   - copy file from host to image\n");
-    printf("  tree [path]               - display directory tree\n");
-    printf("\n - A common command for working with the file registry -\n");
-    printf("  reserve init              - initialize reserve cluster\n");
-    printf("  reserve ls                - list reserve entries\n");
-    printf("  reserve add <path>        - add file entry to reserve\n");
-    printf("  reserve rm <name>         - remove entry by name\n");
-    printf("  reserve clear             - clear all entries\n");
-    printf("  reserve dump              - hex dump of reserve cluster\n");
-    printf("  reserve info              - show reserve info\n\n");
-	printf("  reserve boot set <name>     - set file as boot entry\n");
-    printf("  reserve boot show           - show current boot entry\n");
-    printf("  reserve boot clear          - clear boot entry\n");
-    printf("  exit                      - exit shell\n");
-    printf("  help, ?                   - show this help\n");
+    svde_out("Available commands:\n");
+    svde_out("  ls [path]                 - list directory contents\n");
+    svde_out("  cd [path]                 - change current directory (default: root)\n");
+    svde_out("  pwd                       - print current directory\n");
+    svde_out("  mkdir <path>              - create directory\n");
+    svde_out("  rmdir <path>              - remove empty directory\n");
+    svde_out("  rm <path>                 - delete file\n");
+    svde_out("  copy <host-file> <dest>   - copy file from host to image\n");
+    svde_out("  tree [path]               - display directory tree\n");
+    svde_out("\n - A common command for working with the file registry -\n");
+    svde_out("  reserve init              - initialize reserve cluster\n");
+    svde_out("  reserve ls                - list reserve entries\n");
+    svde_out("  reserve add <path>        - add file entry to reserve\n");
+    svde_out("  reserve rm <name>         - remove entry by name\n");
+    svde_out("  reserve clear             - clear all entries\n");
+    svde_out("  reserve dump              - hex dump of reserve cluster\n");
+    svde_out("  reserve info              - show reserve info\n\n");
+	svde_out("  reserve boot set <name>     - set file as boot entry\n");
+    svde_out("  reserve boot show           - show current boot entry\n");
+    svde_out("  reserve boot clear          - clear boot entry\n");
+    svde_out("  exit                      - exit shell\n");
+    svde_out("  help, ?                   - show this help\n");
 }
 
 static int cmd_ls(int argc, char **argv) {
     const char *path = (argc > 1) ? argv[1] : ".";
     char *abs_path = resolve_path(path);
     if (!abs_path) {
-        fprintf(stderr, "Error: invalid path.\n");
+        svde_err( "Error: invalid path.\n");
         return 1;
     }
     ErrorCode err = fat32_list_dir(&shell_state.disk, shell_state.start_lba, abs_path);
     free(abs_path);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        svde_err( "Error: %s\n", error_code_to_string(err));
         return 1;
     }
     return 0;
@@ -249,13 +250,13 @@ static int cmd_cd(int argc, char **argv) {
     const char *target = (argc > 1) ? argv[1] : "/";
     char *abs_path = resolve_path(target);
     if (!abs_path) {
-        fprintf(stderr, "Error: invalid path.\n");
+        svde_err( "Error: invalid path.\n");
         return 1;
     }
     uint32_t cluster;
     ErrorCode err = fat32_find_dir(&shell_state.disk, &shell_state.info, abs_path, &cluster);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: directory not found.\n");
+        svde_err( "Error: directory not found.\n");
         free(abs_path);
         return 1;
     }
@@ -267,24 +268,24 @@ static int cmd_cd(int argc, char **argv) {
 static int cmd_pwd(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    printf("%s\n", shell_state.current_path);
+    svde_out("%s\n", shell_state.current_path);
     return 0;
 }
 
 static int cmd_mkdir(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: mkdir <path>\n");
+        svde_err( "Usage: mkdir <path>\n");
         return 1;
     }
     char *abs_path = resolve_path(argv[1]);
     if (!abs_path) {
-        fprintf(stderr, "Error: invalid path.\n");
+        svde_err( "Error: invalid path.\n");
         return 1;
     }
     ErrorCode err = fat32_create_dir(&shell_state.disk, shell_state.start_lba, abs_path);
     free(abs_path);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        svde_err( "Error: %s\n", error_code_to_string(err));
         return 1;
     }
     return 0;
@@ -292,18 +293,18 @@ static int cmd_mkdir(int argc, char **argv) {
 
 static int cmd_rmdir(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: rmdir <path>\n");
+        svde_err( "Usage: rmdir <path>\n");
         return 1;
     }
     char *abs_path = resolve_path(argv[1]);
     if (!abs_path) {
-        fprintf(stderr, "Error: invalid path.\n");
+        svde_err( "Error: invalid path.\n");
         return 1;
     }
     ErrorCode err = fat32_remove_dir(&shell_state.disk, shell_state.start_lba, abs_path);
     free(abs_path);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        svde_err( "Error: %s\n", error_code_to_string(err));
         return 1;
     }
     return 0;
@@ -311,18 +312,18 @@ static int cmd_rmdir(int argc, char **argv) {
 
 static int cmd_rm(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: rm <path>\n");
+        svde_err( "Usage: rm <path>\n");
         return 1;
     }
     char *abs_path = resolve_path(argv[1]);
     if (!abs_path) {
-        fprintf(stderr, "Error: invalid path.\n");
+        svde_err( "Error: invalid path.\n");
         return 1;
     }
     ErrorCode err = fat32_delete_file(&shell_state.disk, shell_state.start_lba, abs_path);
     free(abs_path);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        svde_err( "Error: %s\n", error_code_to_string(err));
         return 1;
     }
     return 0;
@@ -330,18 +331,18 @@ static int cmd_rm(int argc, char **argv) {
 
 static int cmd_copy(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: copy <host-file> <dest>\n");
+        svde_err( "Usage: copy <host-file> <dest>\n");
         return 1;
     }
     char *abs_dest = resolve_path(argv[2]);
     if (!abs_dest) {
-        fprintf(stderr, "Error: invalid destination path.\n");
+        svde_err( "Error: invalid destination path.\n");
         return 1;
     }
     ErrorCode err = fat32_copy_file(&shell_state.disk, shell_state.start_lba, argv[1], abs_dest);
     free(abs_dest);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+        svde_err( "Error: %s\n", error_code_to_string(err));
         return 1;
     }
     return 0;
@@ -349,7 +350,7 @@ static int cmd_copy(int argc, char **argv) {
 
 static int cmd_reserve(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: reserve <subcommand> [args]\n");
+        svde_err( "Usage: reserve <subcommand> [args]\n");
         return 1;
     }
     const char *sub = argv[1];
@@ -357,95 +358,95 @@ static int cmd_reserve(int argc, char **argv) {
     if (strcmp(sub, "init") == 0) {
         ErrorCode err = fat32_reserve_init(&shell_state.disk, shell_state.start_lba);
         if (err != ERR_OK) {
-            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            svde_err( "Error: %s\n", error_code_to_string(err));
             return 1;
         }
-        printf("Reserve cluster initialized.\n");
+        svde_out("Reserve cluster initialized.\n");
     } else if (strcmp(sub, "ls") == 0) {
         ErrorCode err = fat32_reserve_list(&shell_state.disk, shell_state.start_lba);
         if (err != ERR_OK) {
-            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            svde_err( "Error: %s\n", error_code_to_string(err));
             return 1;
         }
     } else if (strcmp(sub, "add") == 0) {
         if (argc < 3) {
-            fprintf(stderr, "Usage: reserve add <path>\n");
+            svde_err( "Usage: reserve add <path>\n");
             return 1;
         }
         char *abs_path = resolve_path(argv[2]);
         if (!abs_path) {
-            fprintf(stderr, "Error: invalid path.\n");
+            svde_err( "Error: invalid path.\n");
             return 1;
         }
         ErrorCode err = fat32_reserve_add(&shell_state.disk, shell_state.start_lba, abs_path);
         free(abs_path);
         if (err != ERR_OK) {
-            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            svde_err( "Error: %s\n", error_code_to_string(err));
             return 1;
         }
-        printf("Entry added.\n");
+        svde_out("Entry added.\n");
     } else if (strcmp(sub, "rm") == 0) {
         if (argc < 3) {
-            fprintf(stderr, "Usage: reserve rm <name>\n");
+            svde_err( "Usage: reserve rm <name>\n");
             return 1;
         }
         ErrorCode err = fat32_reserve_remove(&shell_state.disk, shell_state.start_lba, argv[2]);
         if (err != ERR_OK) {
-            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            svde_err( "Error: %s\n", error_code_to_string(err));
             return 1;
         }
-        printf("Entry removed.\n");
+        svde_out("Entry removed.\n");
     } else if (strcmp(sub, "clear") == 0) {
         ErrorCode err = fat32_reserve_clear(&shell_state.disk, shell_state.start_lba);
         if (err != ERR_OK) {
-            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            svde_err( "Error: %s\n", error_code_to_string(err));
             return 1;
         }
-        printf("Reserve cleared.\n");
+        svde_out("Reserve cleared.\n");
     } else if (strcmp(sub, "dump") == 0) {
         ErrorCode err = fat32_reserve_dump(&shell_state.disk, shell_state.start_lba);
         if (err != ERR_OK) {
-            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            svde_err( "Error: %s\n", error_code_to_string(err));
             return 1;
         }
     } else if (strcmp(sub, "info") == 0) {
         ErrorCode err = fat32_reserve_info(&shell_state.disk, shell_state.start_lba);
         if (err != ERR_OK) {
-            fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+            svde_err( "Error: %s\n", error_code_to_string(err));
             return 1;
         }
     } else if (strcmp(sub, "boot") == 0) {
         if (argc < 3) {
-            fprintf(stderr, "Usage: reserve boot set <name> | reserve boot show | reserve boot clear\n");
+            svde_err( "Usage: reserve boot set <name> | reserve boot show | reserve boot clear\n");
             return 1;
         }
         const char *subsub = argv[2];
         if (strcmp(subsub, "set") == 0) {
             if (argc < 4) {
-                fprintf(stderr, "Usage: reserve boot set <name>\n");
+                svde_err( "Usage: reserve boot set <name>\n");
                 return 1;
             }
             ErrorCode err = fat32_reserve_boot_set(&shell_state.disk, shell_state.start_lba, argv[3]);
             if (err != ERR_OK) {
-                fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+                svde_err( "Error: %s\n", error_code_to_string(err));
                 return 1;
             }
-            printf("Boot entry set.\n");
+            svde_out("Boot entry set.\n");
         } else if (strcmp(subsub, "show") == 0) {
             ErrorCode err = fat32_reserve_boot_show(&shell_state.disk, shell_state.start_lba);
             if (err != ERR_OK) {
-                fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+                svde_err( "Error: %s\n", error_code_to_string(err));
                 return 1;
             }
         } else if (strcmp(subsub, "clear") == 0) {
             ErrorCode err = fat32_reserve_boot_clear(&shell_state.disk, shell_state.start_lba);
             if (err != ERR_OK) {
-                fprintf(stderr, "Error: %s\n", error_code_to_string(err));
+                svde_err( "Error: %s\n", error_code_to_string(err));
                 return 1;
             }
-            printf("Boot entry cleared.\n");
+            svde_out("Boot entry cleared.\n");
         } else {
-            fprintf(stderr, "Unknown boot subcommand: %s\n", subsub);
+            svde_err( "Unknown boot subcommand: %s\n", subsub);
             return 1;
         }
     }
@@ -454,7 +455,7 @@ static int cmd_reserve(int argc, char **argv) {
 
 static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
                        const char *name, const char *prefix, int is_last) {
-    printf("%s%s%s\n", prefix, (is_last ? "'-- " : "|-- "), name);
+    svde_out("%s%s%s\n", prefix, (is_last ? "'-- " : "|-- "), name);
 
     uint8_t *buffer = NULL;
     uint32_t entries = 0;
@@ -521,7 +522,7 @@ static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
         } else {
             char file_info[256];
             snprintf(file_info, sizeof(file_info), "%s (%u bytes)", child->name, child->size);
-            printf("%s%s%s\n", new_prefix, (last ? "'-- " : "|-- "), file_info);
+            svde_out("%s%s%s\n", new_prefix, (last ? "'-- " : "|-- "), file_info);
         }
         free(child->name);
     }
@@ -532,19 +533,19 @@ static int cmd_tree(int argc, char **argv) {
     const char *path = (argc > 1) ? argv[1] : ".";
     char *abs_path = resolve_path(path);
     if (!abs_path) {
-        fprintf(stderr, "Error: invalid path.\n");
+        svde_err( "Error: invalid path.\n");
         return 1;
     }
 
     uint32_t cluster;
     ErrorCode err = fat32_find_dir(&shell_state.disk, &shell_state.info, abs_path, &cluster);
     if (err != ERR_OK) {
-        fprintf(stderr, "Error: cannot find path.\n");
+        svde_err( "Error: cannot find path.\n");
         free(abs_path);
         return 1;
     }
 
-    printf("Directory tree of %s:\n", abs_path);
+    svde_out("Directory tree of %s:\n", abs_path);
     print_tree(&shell_state.disk, &shell_state.info, cluster, abs_path, "", 1);
     free(abs_path);
     return 0;
@@ -556,11 +557,11 @@ ErrorCode cmd_shell(CMDArgs *args) {
         return err;
     }
 
-    printf("FAT32 Shell. Type 'help' for commands.\n");
+    svde_out("FAT32 Shell. Type 'help' for commands.\n");
 
     char line[MAX_CMD_LINE];
     while (1) {
-        printf("fs> ");
+        svde_out("");
         fflush(stdout);
         if (!fgets(line, sizeof(line), stdin)) {
             break;
@@ -574,7 +575,7 @@ ErrorCode cmd_shell(CMDArgs *args) {
         char *argv[MAX_ARGS];
         int argc = parse_line(line, argv, MAX_ARGS);
         if (argc < 0) {
-            fprintf(stderr, "Error: invalid command line (too many args or unmatched quotes).\n");
+            svde_err( "Error: invalid command line (too many args or unmatched quotes).\n");
             continue;
         }
         if (argc == 0) {
@@ -605,7 +606,7 @@ ErrorCode cmd_shell(CMDArgs *args) {
         } else if (strcmp(cmd, "reserve") == 0) {
             cmd_reserve(argc, argv);
         } else {
-            fprintf(stderr, "Unknown command: %s\n", cmd);
+            svde_err( "Unknown command: %s\n", cmd);
         }
     }
 

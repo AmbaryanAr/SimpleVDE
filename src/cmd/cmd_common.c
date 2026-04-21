@@ -1,9 +1,10 @@
-#include "cmd_common.h"
 #include "utils.h"
+#include "output.h"
+#include "cmd_common.h"
 #include <stdio.h>
 
 void print_error(ErrorCode err, const char *context) {
-    fprintf(stderr, "Error: %s - %s\n", context, error_code_to_string(err));
+    svde_err( "Error: %s - %s\n", context, error_code_to_string(err));
 }
 
 ErrorCode open_disk_and_check_table(CMDArgs *args, Disk *disk) {
@@ -41,7 +42,7 @@ ErrorCode open_disk_and_get_partition_info(CMDArgs *args, Disk *disk, uint64_t *
     int part_index = parse_part_index(args->part);
     if (part_index < 0) {
         disk_close(disk);
-        fprintf(stderr, "Error: invalid partition number '%s'.\n", args->part);
+        svde_err( "Error: invalid partition number '%s'.\n", args->part);
         return ERR_INVALID_ARGUMENT;
     }
 
@@ -49,7 +50,7 @@ ErrorCode open_disk_and_get_partition_info(CMDArgs *args, Disk *disk, uint64_t *
     if (err != ERR_OK) {
         disk_close(disk);
         if (err == ERR_NOT_FOUND) {
-            fprintf(stderr, "Error: partition %d does not exist.\n", part_index + 1);
+            svde_err( "Error: partition %d does not exist.\n", part_index + 1);
         } else {
             print_error(err, "cannot get partition info");
         }
@@ -76,7 +77,7 @@ ErrorCode open_disk_and_get_partition(CMDArgs *args, Disk *disk, uint64_t *start
     int part_index = parse_part_index(args->part);
     if (part_index < 0) {
         disk_close(disk);
-        fprintf(stderr, "Error: invalid partition number '%s'.\n", args->part);
+        svde_err( "Error: invalid partition number '%s'.\n", args->part);
         return ERR_INVALID_ARGUMENT;
     }
 
@@ -85,7 +86,7 @@ ErrorCode open_disk_and_get_partition(CMDArgs *args, Disk *disk, uint64_t *start
     if (err != ERR_OK) {
         disk_close(disk);
         if (err == ERR_NOT_FOUND) {
-            fprintf(stderr, "Error: partition %d does not exist.\n", part_index + 1);
+            svde_err( "Error: partition %d does not exist.\n", part_index + 1);
         } else {
             print_error(err, "cannot get partition info");
         }
@@ -103,7 +104,7 @@ ErrorCode open_disk_and_prepare_fs(CMDArgs *args, Disk *disk, uint64_t *start_lb
     err = fat32_get_info(disk, *start_lba, info);
     if (err != ERR_OK) {
         disk_close(disk);
-        fprintf(stderr, "Error: partition %d is not a valid FAT32 filesystem.\n", parse_part_index(args->part) + 1);
+        svde_err( "Error: partition %d is not a valid FAT32 filesystem.\n", parse_part_index(args->part) + 1);
         return ERR_INVALID_SIGNATURE;
     }
     return ERR_OK;
