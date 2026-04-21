@@ -20,24 +20,13 @@ SOURCES = $(SRCDIR)/main.c \
 # Преобразование в объектные файлы
 OBJECTS = $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(SOURCES))
 
-# Команда создания каталога
-ifeq ($(OS),Windows_NT)
-    define MKDIR
-	@if not exist "$(subst /,\,$(dir $@))" mkdir "$(subst /,\,$(dir $@))"
-    endef
-else
-    define MKDIR
-	@mkdir -p $(dir $@)
-    endef
-endif
-
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
 	$(CC) $^ -o $@
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
-	$(MKDIR)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
