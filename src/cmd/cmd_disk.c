@@ -10,6 +10,7 @@
 #include <string.h>
 #include <inttypes.h>
 
+// Читает count_bytes байт с диска от offset_bytes и выводит hex-дамп с ASCII-колонкой
 static ErrorCode disk_read_and_dump(Disk *disk, uint64_t offset_bytes, uint64_t count_bytes) {
     if (offset_bytes + count_bytes > disk->size) {
         svde_err( "Read range exceeds disk size.\n");

@@ -14,6 +14,8 @@ typedef struct {
     uint32_t size;
 } child_entry_t;
 
+// Рекурсивно выводит дерево каталога, начиная с cluster, с отступами prefix.
+// is_last указывает, является ли текущий элемент последним на своём уровне.
 static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
                        const char *name, const char *prefix, int is_last) {
     svde_out("%s%s%s\n", prefix, (is_last ? "'-- " : "|-- "), name);

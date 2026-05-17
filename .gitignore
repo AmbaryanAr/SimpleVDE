@@ -7,11 +7,13 @@
 simplevde
 simplevde.exe
 simplevde.a
+a.exe
 
 # Директория с объектными файлами
 debag/
 obj/
 build/
+docs/
 
 # Библиотеки и временные файлы компилятора
 *.lib

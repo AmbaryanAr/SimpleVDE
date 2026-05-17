@@ -22,22 +22,51 @@ static struct {
     char part_str[16];
 } shell_state = { .is_open = 0 };
 
+// Приводит абсолютный путь к каноническому виду: убирает ".", "..", двойные слеши
 static char* normalize_path(const char *path);
+
+// Преобразует относительный или абсолютный путь в абсолютный на основе current_path
 static char* resolve_path(const char *input);
+
+// Разбирает строку на аргументы (аналог argv). Поддерживает кавычки.
+// Возвращает количество аргументов или -1 при ошибке.
 static int parse_line(char *line, char **argv, int max_args);
+
+// Выводит список команд интерактивной оболочки
 static void print_help(void);
+
+// Обработчик команды ls: выводит содержимое каталога
 static int cmd_ls(int argc, char **argv);
+
+// Обработчик команды cd: меняет текущий каталог
 static int cmd_cd(int argc, char **argv);
+
+// Обработчик команды pwd: выводит текущий каталог
 static int cmd_pwd(int argc, char **argv);
+
+// Обработчик команды mkdir: создаёт каталог
 static int cmd_mkdir(int argc, char **argv);
+
+// Обработчик команды rmdir: удаляет пустой каталог
 static int cmd_rmdir(int argc, char **argv);
+
+// Обработчик команды rm: удаляет файл
 static int cmd_rm(int argc, char **argv);
+
+// Обработчик команды copy: копирует файл с хоста в образ
 static int cmd_copy(int argc, char **argv);
+
+// Обработчик команды reserve: работает с реестром (init/ls/add/rm/clear/dump/info/boot)
 static int cmd_reserve(int argc, char **argv);
+
+// Обработчик команды tree: выводит дерево каталогов
 static int cmd_tree(int argc, char **argv);
+
+// Рекурсивно выводит дерево каталога (дублирует логику из cmd_fs.c)
 static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
                        const char *name, const char *prefix, int is_last);
 
+// Инициализирует состояние оболочки: открывает диск, проверяет раздел и FAT32
 static ErrorCode shell_init(const char *file, const char *part) {
     if (shell_state.is_open) {
         return ERR_OK;
@@ -90,6 +119,7 @@ static ErrorCode shell_init(const char *file, const char *part) {
     return ERR_OK;
 }
 
+// Закрывает диск и сбрасывает состояние оболочки
 static void shell_shutdown(void) {
     if (shell_state.is_open) {
         disk_close(&shell_state.disk);
@@ -501,7 +531,7 @@ static void print_tree(Disk *disk, const Fat32Info *info, uint32_t cluster,
         }
 
         children = realloc(children, (child_count + 1) * sizeof(child_entry_t));
-        children[child_count].name = strdup(display_name);
+        children[child_count].name = my_strdup(display_name);
         children[child_count].cluster = ((uint32_t)se->first_cluster_hi << 16) | se->first_cluster_lo;
         children[child_count].is_dir = (se->attr & FAT32_ATTR_DIRECTORY) != 0;
         children[child_count].size = se->file_size;

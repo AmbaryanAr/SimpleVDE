@@ -5,7 +5,8 @@
 #include <ctype.h>
 #include <stdio.h>
 
-// Вспомогательная функция для поиска индекса записи в открытом каталоге по имени
+// Ищет запись в открытом каталоге по имени (аналог функции из fat32_dir.c).
+// Возвращает 0 при успехе, -1 если не найдено.
 static int find_entry_by_name(Disk *disk, const Fat32Info *info, Fat32Directory *dir,
                               const char *name, uint32_t *out_cluster_idx, uint32_t *out_entry_idx) {
     if (!disk || !info || !dir || !name || !out_cluster_idx || !out_entry_idx) return -1;
@@ -52,7 +53,7 @@ static int find_entry_by_name(Disk *disk, const Fat32Info *info, Fat32Directory 
     return result;
 }
 
-// Пометка записи и всех связанных LFN как удалённых
+// Помечает запись каталога и все связанные LFN как удалённые, записывает изменения на диск
 static ErrorCode mark_entry_deleted(Disk *disk, const Fat32Info *info, Fat32Directory *dir,
                                     uint32_t cluster_idx, uint32_t entry_idx) {
     if (!disk || !info || !dir) return ERR_INVALID_ARGUMENT;

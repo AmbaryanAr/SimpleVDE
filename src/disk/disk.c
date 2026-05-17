@@ -5,10 +5,12 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
+// Устанавливает позицию чтения/записи в файле. Возвращает true при успехе.
 static bool disk_seek(FILE *file, uint64_t offset) {
     return fseek64(file, offset, SEEK_SET) == 0;
 }
 
+// Читает size байт из файла по смещению offset в буфер. Возвращает количество прочитанных байт.
 static size_t disk_read_at(FILE *file, void *buffer, uint64_t size, uint64_t offset) {
     if (!disk_seek(file, offset)) {
         return 0;
@@ -16,6 +18,7 @@ static size_t disk_read_at(FILE *file, void *buffer, uint64_t size, uint64_t off
     return fread(buffer, 1, size, file);
 }
 
+// Записывает size байт из data в файл по смещению offset. Возвращает количество записанных байт.
 static size_t disk_write_at(FILE *file, const void *data, uint64_t size, uint64_t offset) {
     if (!disk_seek(file, offset)) {
         return 0;

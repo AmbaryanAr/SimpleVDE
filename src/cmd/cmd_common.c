@@ -3,8 +3,46 @@
 #include "cmd_common.h"
 #include <stdio.h>
 
-void print_error(ErrorCode err, const char *context) {
+// Выводит сообщение об ошибке с контекстом через svde_err (формат: "Error: <context> - <текст>")
+static void print_error(ErrorCode err, const char *context) {
     svde_err( "Error: %s - %s\n", context, error_code_to_string(err));
+}
+
+// Открывает диск, проверяет таблицу разделов и получает start_lba (без проверки файловой системы).
+static ErrorCode open_disk_and_get_partition(CMDArgs *args, Disk *disk, uint64_t *start_lba) {
+    ErrorCode err = disk_open(args->file, disk);
+    if (err != ERR_OK) {
+        print_error(err, "cannot open disk image");
+        return err;
+    }
+
+    PartitionTableType table_type;
+    err = partition_detect_type(disk, &table_type);
+    if (err != ERR_OK || table_type == PT_UNKNOWN) {
+        disk_close(disk);
+        print_error(err != ERR_OK ? err : ERR_INVALID_SIGNATURE, "invalid partition table");
+        return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
+    }
+
+    int part_index = parse_part_index(args->part);
+    if (part_index < 0) {
+        disk_close(disk);
+        svde_err( "Error: invalid partition number '%s'.\n", args->part);
+        return ERR_INVALID_ARGUMENT;
+    }
+
+    uint64_t size_sectors;
+    err = partition_get_info(disk, part_index, start_lba, &size_sectors);
+    if (err != ERR_OK) {
+        disk_close(disk);
+        if (err == ERR_NOT_FOUND) {
+            svde_err( "Error: partition %d does not exist.\n", part_index + 1);
+        } else {
+            print_error(err, "cannot get partition info");
+        }
+        return err;
+    }
+    return ERR_OK;
 }
 
 ErrorCode open_disk_and_check_table(CMDArgs *args, Disk *disk) {
@@ -47,42 +85,6 @@ ErrorCode open_disk_and_get_partition_info(CMDArgs *args, Disk *disk, uint64_t *
     }
 
     err = partition_get_info(disk, part_index, start_lba, size_sectors);
-    if (err != ERR_OK) {
-        disk_close(disk);
-        if (err == ERR_NOT_FOUND) {
-            svde_err( "Error: partition %d does not exist.\n", part_index + 1);
-        } else {
-            print_error(err, "cannot get partition info");
-        }
-        return err;
-    }
-    return ERR_OK;
-}
-
-ErrorCode open_disk_and_get_partition(CMDArgs *args, Disk *disk, uint64_t *start_lba) {
-    ErrorCode err = disk_open(args->file, disk);
-    if (err != ERR_OK) {
-        print_error(err, "cannot open disk image");
-        return err;
-    }
-
-    PartitionTableType table_type;
-    err = partition_detect_type(disk, &table_type);
-    if (err != ERR_OK || table_type == PT_UNKNOWN) {
-        disk_close(disk);
-        print_error(err != ERR_OK ? err : ERR_INVALID_SIGNATURE, "invalid partition table");
-        return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
-    }
-
-    int part_index = parse_part_index(args->part);
-    if (part_index < 0) {
-        disk_close(disk);
-        svde_err( "Error: invalid partition number '%s'.\n", args->part);
-        return ERR_INVALID_ARGUMENT;
-    }
-
-    uint64_t size_sectors;
-    err = partition_get_info(disk, part_index, start_lba, &size_sectors);
     if (err != ERR_OK) {
         disk_close(disk);
         if (err == ERR_NOT_FOUND) {

@@ -5,7 +5,7 @@
 
 // ==================== Вспомогательные функции ====================
 
-// Вычисление контрольной суммы SFN (11 байт) – алгоритм из спецификации FAT
+// Вычисляет контрольную сумму короткого имени (11 байт) для LFN-записей
 static uint8_t calc_checksum(const uint8_t *sfn) {
     uint8_t sum = 0;
     for (int i = 0; i < 11; i++) {
@@ -14,7 +14,7 @@ static uint8_t calc_checksum(const uint8_t *sfn) {
     return sum;
 }
 
-// Проверка, что строка состоит только из печатных ASCII символов (0x20-0x7E)
+// Проверяет, что строка состоит только из печатных ASCII-символов (0x20–0x7E)
 static bool is_all_ascii(const char *s) {
     while (*s) {
         unsigned char c = *s++;
@@ -23,7 +23,7 @@ static bool is_all_ascii(const char *s) {
     return true;
 }
 
-// Преобразование ASCII-строки в UTF-16LE (простое расширение)
+// Преобразует ASCII-строку в UTF-16LE простым расширением байта до uint16_t
 static size_t ascii_to_utf16le(const char *src, uint16_t *dst, size_t dst_capacity) {
     size_t i = 0;
     while (src[i] && i < dst_capacity) {
@@ -33,7 +33,7 @@ static size_t ascii_to_utf16le(const char *src, uint16_t *dst, size_t dst_capaci
     return i;
 }
 
-// Разделение имени на основу и расширение (по последней точке)
+// Разделяет имя файла на основу (до 5 символов) и расширение (до 3 символов) по последней точке
 static void split_name(const char *name, char *base, size_t base_size, char *ext, size_t ext_size) {
     const char *dot = strrchr(name, '.');
     if (dot) {
@@ -52,7 +52,7 @@ static void split_name(const char *name, char *base, size_t base_size, char *ext
     }
 }
 
-// Формирование базового SFN (без суффикса) из основы и расширения.
+// Формирует базовое короткое имя (5+~1+3) из основы и расширения без проверки уникальности
 static void make_basic_sfn_from_parts(const char *base, const char *ext, uint8_t sfn[11]) {
     memset(sfn, ' ', 11);
     // Основная часть (до 5 символов)
@@ -73,7 +73,7 @@ static void make_basic_sfn_from_parts(const char *base, const char *ext, uint8_t
     }
 }
 
-// Поиск максимального суффикса для заданной основы (первые 5 байт) в буфере каталога.
+// Находит следующий свободный числовой суффикс (~N) для заданной основы имени в каталоге
 static int find_next_suffix(const uint8_t *dir_buffer, uint32_t entry_count, const uint8_t *base_sfn) {
     int max_suffix = 0;
     for (uint32_t i = 0; i < entry_count; i++) {
@@ -97,7 +97,7 @@ static int find_next_suffix(const uint8_t *dir_buffer, uint32_t entry_count, con
     return max_suffix + 1;
 }
 
-// Генерация уникального SFN (всегда с суффиксом)
+// Генерирует уникальное короткое имя (~1..~99) на основе имени и содержимого каталога
 static ErrorCode make_unique_sfn(const uint8_t *dir_buffer, uint32_t entry_count,
                                       const char *base, const char *ext,
                                       uint8_t sfn[11]) {
@@ -121,7 +121,7 @@ static ErrorCode make_unique_sfn(const uint8_t *dir_buffer, uint32_t entry_count
     return ERR_OK;
 }
 
-// Создание LFN-записей для заданного UTF-16LE имени и контрольной суммы
+// Создаёт массив LFN-записей для заданного UTF-16LE имени и контрольной суммы SFN
 static ErrorCode create_lfn_entries(const uint16_t *utf16_name, size_t len,
                                          uint8_t checksum,
                                          Fat32LongEntry **entries_out, uint8_t *count_out) {
@@ -161,6 +161,7 @@ static ErrorCode create_lfn_entries(const uint16_t *utf16_name, size_t len,
 
 // ==================== Преобразование времени ====================
 
+// Преобразует struct tm в 16-битный формат времени FAT (часы:минуты:секунды/2)
 static uint16_t fat_time_from_tm(const struct tm *tm) {
     uint16_t time = 0;
     time |= (tm->tm_hour << 11) & 0xF800;   // часы 5 бит
@@ -169,6 +170,7 @@ static uint16_t fat_time_from_tm(const struct tm *tm) {
     return time;
 }
 
+// Преобразует struct tm в 16-битный формат даты FAT (год-1980:месяц:день)
 static uint16_t fat_date_from_tm(const struct tm *tm) {
     uint16_t date = 0;
     uint16_t year = (uint16_t)(tm->tm_year + 1900 - 1980);

@@ -16,6 +16,7 @@
 
 // ==================== Работа с BPB ====================
 
+// Читает номер резервного кластера из BPB (поле по смещению RESERVED_FIELD_OFFSET)
 static ErrorCode get_reserve_cluster(Disk *disk, uint64_t start_lba, uint32_t *cluster) {
     uint8_t sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, start_lba * SECTOR_SIZE);
@@ -24,7 +25,7 @@ static ErrorCode get_reserve_cluster(Disk *disk, uint64_t start_lba, uint32_t *c
     return ERR_OK;
 }
 
-// Записать номер резервного кластера в BPB
+// Записывает номер резервного кластера в BPB и резервный BPB (сектор 6)
 static ErrorCode set_reserve_cluster(Disk *disk, uint64_t start_lba, uint32_t cluster) {
     uint8_t sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, start_lba * SECTOR_SIZE);
@@ -37,7 +38,7 @@ static ErrorCode set_reserve_cluster(Disk *disk, uint64_t start_lba, uint32_t cl
     return err;
 }
 
-// Получить кластер загрузочного файла из BPB
+// Читает номер загрузочного кластера из BPB (поле по смещению RESERVED_FIELD_OFFSET + 4)
 static ErrorCode get_boot_cluster(Disk *disk, uint64_t start_lba, uint32_t *cluster) {
     uint8_t sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, start_lba * SECTOR_SIZE);
@@ -46,7 +47,7 @@ static ErrorCode get_boot_cluster(Disk *disk, uint64_t start_lba, uint32_t *clus
     return ERR_OK;
 }
 
-// Записать кластер загрузочного файла в BPB
+// Записывает номер загрузочного кластера в BPB и резервный BPB (сектор 6)
 static ErrorCode set_boot_cluster(Disk *disk, uint64_t start_lba, uint32_t cluster) {
     uint8_t sector[SECTOR_SIZE];
     ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, start_lba * SECTOR_SIZE);
@@ -61,6 +62,8 @@ static ErrorCode set_boot_cluster(Disk *disk, uint64_t start_lba, uint32_t clust
 
 // ==================== Вспомогательные функции ====================
 
+// Ищет первый свободный слот в резервном кластере (первый байт == '\0').
+// Возвращает индекс слота или -1, если все заняты.
 static int find_empty_slot(const uint8_t *cluster_data, uint32_t slots) {
     for (uint32_t i = 0; i < slots; i++) {
         const uint8_t *slot = cluster_data + i * RESERVED_SLOT_SIZE;
@@ -69,7 +72,7 @@ static int find_empty_slot(const uint8_t *cluster_data, uint32_t slots) {
     return -1;
 }
 
-// Проверка, что имя допустимо (ASCII, длина <= 120)
+// Проверяет допустимость имени для реестра: ASCII, длина от 1 до RESERVED_NAME_SIZE
 static bool is_valid_name(const char *name) {
     size_t len = strlen(name);
     if (len == 0 || len > RESERVED_NAME_SIZE) return false;
@@ -80,6 +83,7 @@ static bool is_valid_name(const char *name) {
     return true;
 }
 
+// Находит файл в ФС по абсолютному пути и возвращает номер первого кластера и размер
 static ErrorCode get_file_cluster(Disk *disk, const Fat32Info *info, const char *path,
                                   uint32_t *cluster, uint32_t *size) {
     char *path_copy = my_strdup(path);

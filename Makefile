@@ -1,10 +1,18 @@
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Iinclude
-TARGET = simplevde.exe
+LDFLAGS =
+
+# Автоопределение расширения исполняемого файла
+ifeq ($(OS),Windows_NT)
+    TARGET = simplevde.exe
+else
+    TARGET = simplevde
+    CFLAGS += -D_FILE_OFFSET_BITS=64
+endif
+
 SRCDIR = src
 OBJDIR = obj
 
-# Все исходные файлы
 SOURCES = $(SRCDIR)/main.c \
           $(SRCDIR)/utils.c \
           $(SRCDIR)/output.c \
@@ -18,13 +26,12 @@ SOURCES = $(SRCDIR)/main.c \
           $(wildcard $(SRCDIR)/partition/mbr/*.c) \
           $(wildcard $(SRCDIR)/shell/*.c)
 
-# Преобразование в объектные файлы
 OBJECTS = $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(SOURCES))
 
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(CC) $^ -o $@
+	$(CC) $^ -o $@ $(LDFLAGS)
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $(dir $@)

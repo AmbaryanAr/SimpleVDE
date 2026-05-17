@@ -9,12 +9,13 @@
 
 // ==================== Вспомогательные функции ====================
 
-// Проверяет, свободна ли запись (первый байт 0x00 или 0xE5)
+// Проверяет, свободна ли запись каталога (первый байт 0x00 или 0xE5)
 static bool is_entry_free(const uint8_t *entry) {
     return entry[0] == 0x00 || entry[0] == 0xE5;
 }
 
-// Поиск записи в открытом каталоге по имени с использованием линейного буфера
+// Ищет запись в открытом каталоге по имени (с учётом LFN). Возвращает индекс кластера и записи.
+// При отсутствии возвращает -1.
 static int find_entry_by_name(Disk *disk, const Fat32Info *info, Fat32Directory *dir,
                               const char *name, uint32_t *out_cluster_idx, uint32_t *out_entry_idx) {
     if (!disk || !info || !dir || !name || !out_cluster_idx || !out_entry_idx) return -1;
@@ -63,7 +64,7 @@ static int find_entry_by_name(Disk *disk, const Fat32Info *info, Fat32Directory 
     return result;
 }
 
-// Помечаем запись и все связанные LFN как удалённые (аналогично mark_entry_deleted в fat32_file.c)
+// Помечает запись каталога и все связанные с ней LFN как удалённые (байт 0xE5)
 static ErrorCode mark_entry_deleted_in_dir(Disk *disk, const Fat32Info *info,
                                            Fat32Directory *dir, uint32_t cluster_idx,
                                            uint32_t entry_idx) {
@@ -106,7 +107,7 @@ static ErrorCode mark_entry_deleted_in_dir(Disk *disk, const Fat32Info *info,
     return ERR_OK;
 }
 
-// Проверка, пуст ли каталог (только "." и "..")
+// Проверяет, пуст ли каталог (содержит только "." и "..")
 static bool is_directory_empty(Disk *disk, const Fat32Info *info, uint32_t cluster) {
     Fat32Directory dir;
     ErrorCode err = fat32_dir_open(disk, info, cluster, &dir);

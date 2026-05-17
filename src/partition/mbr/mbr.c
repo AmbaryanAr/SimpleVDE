@@ -7,18 +7,23 @@
 #include <string.h>
 #include <stdlib.h>
 
+// Читает MBR-сектор (512 байт) с диска
 static ErrorCode mbr_read(Disk *disk, MbrSector *mbr) {
     return disk_read(disk, mbr, sizeof(MbrSector), 0);
 }
 
+// Записывает MBR-сектор (512 байт) на диск
 static ErrorCode mbr_write(Disk *disk, const MbrSector *mbr) {
     return disk_write(disk, mbr, sizeof(MbrSector), 0);
 }
 
+// Проверяет, пуста ли запись раздела (код типа == 0x00)
 static bool is_partition_empty(const MbrPartitionEntry *entry) {
     return entry->partition_type == 0;
 }
 
+// Находит первый свободный LBA после всех существующих разделов.
+// Начинает поиск с LBA 2048 (традиционное выравнивание).
 static uint64_t find_next_free_lba(const MbrPartitionEntry *parts) {
     uint64_t next = 2048;
     for (int i = 0; i < 4; i++) {

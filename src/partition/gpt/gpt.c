@@ -10,6 +10,7 @@
 #include <string.h>
 #include <inttypes.h>
 
+// Генерирует случайный GUID версии 4 и записывает в 16-байтовый массив
 static void generate_guid(uint8_t *guid) {
     for (int i = 0; i < 16; i++) {
         guid[i] = rand() & 0xFF;
@@ -18,6 +19,7 @@ static void generate_guid(uint8_t *guid) {
     guid[8] = (guid[8] & 0x3F) | 0x80;
 }
 
+// Вычисляет CRC32 данных по алгоритму, используемому в GPT (полином 0xEDB88320)
 static uint32_t crc32(const void *data, size_t len) {
     const uint8_t *buf = (const uint8_t*)data;
     uint32_t crc = 0xFFFFFFFF;
@@ -34,6 +36,7 @@ static uint32_t crc32(const void *data, size_t len) {
     return ~crc;
 }
 
+// Проверяет, пуста ли запись раздела GPT (все 128 байт равны нулю)
 static bool is_partition_empty(const GptPartitionEntry *entry) {
     const uint8_t *p = (const uint8_t*)entry;
     for (size_t i = 0; i < sizeof(GptPartitionEntry); i++) {
@@ -44,6 +47,7 @@ static bool is_partition_empty(const GptPartitionEntry *entry) {
     return true;
 }
 
+// Записывает защитный MBR (раздел типа 0xEE на весь диск) для GPT
 static ErrorCode write_protective_mbr(Disk *disk, uint64_t disk_sectors) {
     MbrSector mbr;
     memset(&mbr, 0, sizeof(mbr));
@@ -65,6 +69,24 @@ static ErrorCode write_protective_mbr(Disk *disk, uint64_t disk_sectors) {
     p->sector_count = (uint32_t)size;
     mbr.signature = MBR_SIGNATURE;
     return disk_write(disk, &mbr, sizeof(mbr), 0);
+}
+
+// Находит первый свободный LBA в пределах [first_usable, last_usable] после всех разделов
+static uint64_t find_next_free_lba(const GptPartitionEntry *parts, uint32_t num_entries,
+                                   uint64_t first_usable, uint64_t last_usable) {
+    uint64_t next = first_usable;
+    for (uint32_t i = 0; i < num_entries; i++) {
+        if (!is_partition_empty(&parts[i])) {
+            uint64_t end = parts[i].last_lba + 1;
+            if (end > next) {
+                next = end;
+            }
+        }
+    }
+    if (next > last_usable) {
+        next = last_usable + 1;
+    }
+    return next;
 }
 
 ErrorCode gpt_init(Disk *disk) {
@@ -144,23 +166,6 @@ ErrorCode gpt_init(Disk *disk) {
     err = disk_write(disk, &header, sizeof(header), header.backup_lba * SECTOR_SIZE);
     free(partitions);
     return err;
-}
-
-static uint64_t find_next_free_lba(const GptPartitionEntry *parts, uint32_t num_entries,
-                                   uint64_t first_usable, uint64_t last_usable) {
-    uint64_t next = first_usable;
-    for (uint32_t i = 0; i < num_entries; i++) {
-        if (!is_partition_empty(&parts[i])) {
-            uint64_t end = parts[i].last_lba + 1;
-            if (end > next) {
-                next = end;
-            }
-        }
-    }
-    if (next > last_usable) {
-        next = last_usable + 1;
-    }
-    return next;
 }
 
 ErrorCode gpt_create_partition(Disk *disk, int index, uint64_t size_sectors, const uint8_t *type_guid) {

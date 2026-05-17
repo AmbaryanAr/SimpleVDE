@@ -1,6 +1,7 @@
 #ifndef ERROR_CODES_H
 #define ERROR_CODES_H
 
+// Коды ошибок, возвращаемые всеми функциями утилиты
 typedef enum {
     ERR_OK = 0,               // Успешное завершение
     ERR_MISSING_ARGUMENT,     // Отсутствует обязательный аргумент
@@ -22,24 +23,24 @@ typedef enum {
     ERR_DIR_NOT_EMPTY,        // Каталог не пуст
     ERR_UNKNOWN,              // Неизвестная ошибка
     // Коды ошибок FAT32
-    ERR_FAT32_BAD_BPB,
-    ERR_FAT32_FSINFO_CORRUPT,
-    ERR_FAT32_VOLUME_NOT_MOUNTED,
-    ERR_FAT32_NO_FREE_CLUSTER,
-    ERR_FAT32_BAD_CLUSTER,
-    ERR_FAT32_FAT_CORRUPT,
-    ERR_FAT32_DIR_NO_FREE_ENTRY,
-    ERR_FAT32_DIR_IS_NOT_DIRECTORY,
-    ERR_FAT32_NAME_TOO_LONG,
-    ERR_FAT32_NAME_INVALID,
-    ERR_FAT32_UTF16_CONVERSION,
-    ERR_FAT32_LFN_CHECKSUM,
-    ERR_FAT32_TOO_MANY_LFN_ENTRIES,
-    ERR_FAT32_SFN_SUFFIX_OVERFLOW,
-	ERR_RESERVE_NOT_INIT,             // Резервный кластер не инициализирован
+    ERR_FAT32_BAD_BPB,             // Повреждённый BPB-сектор
+    ERR_FAT32_FSINFO_CORRUPT,      // Повреждённый FSInfo-сектор
+    ERR_FAT32_VOLUME_NOT_MOUNTED,  // Том не смонтирован
+    ERR_FAT32_NO_FREE_CLUSTER,     // Нет свободных кластеров
+    ERR_FAT32_BAD_CLUSTER,         // Обнаружен сбойный кластер
+    ERR_FAT32_FAT_CORRUPT,         // Повреждена FAT-таблица
+    ERR_FAT32_DIR_NO_FREE_ENTRY,   // Нет свободной записи в каталоге
+    ERR_FAT32_DIR_IS_NOT_DIRECTORY,// Запись не является каталогом
+    ERR_FAT32_NAME_TOO_LONG,       // Имя файла слишком длинное
+    ERR_FAT32_NAME_INVALID,        // Недопустимые символы в имени
+    ERR_FAT32_UTF16_CONVERSION,    // Ошибка преобразования UTF-16
+    ERR_FAT32_LFN_CHECKSUM,        // Несовпадение контрольной суммы LFN
+    ERR_FAT32_TOO_MANY_LFN_ENTRIES,// Слишком много LFN-записей
+    ERR_FAT32_SFN_SUFFIX_OVERFLOW, // Переполнение суффикса SFN (~1..~99)
+    ERR_RESERVE_NOT_INIT,          // Резервный кластер не инициализирован
 } ErrorCode;
 
-/** Возвращает строковое описание кода ошибки. */
+// Возвращает строковое описание кода ошибки
 const char* error_code_to_string(ErrorCode code);
 
 #endif

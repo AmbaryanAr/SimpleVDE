@@ -3,15 +3,17 @@
 #include <string.h>
 #include <time.h>
 
-// Чтение сектора FAT
+// Читает один сектор FAT по указанному LBA и номеру сектора внутри FAT
 static ErrorCode read_fat_sector(Disk *disk, uint64_t fat_lba, uint32_t sector_num, uint8_t *buffer) {
     return disk_read(disk, buffer, SECTOR_SIZE, (fat_lba + sector_num) * SECTOR_SIZE);
 }
 
+// Записывает один сектор FAT по указанному LBA и номеру сектора внутри FAT
 static ErrorCode write_fat_sector(Disk *disk, uint64_t fat_lba, uint32_t sector_num, const uint8_t *buffer) {
     return disk_write(disk, buffer, SECTOR_SIZE, (fat_lba + sector_num) * SECTOR_SIZE);
 }
 
+// Читает значение записи FAT для заданного кластера из первой копии FAT
 static ErrorCode get_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t *value) {
     if (cluster < 2 || cluster > info->total_clusters + 1)
         return ERR_INVALID_ARGUMENT;
@@ -25,6 +27,7 @@ static ErrorCode get_fat_entry(Disk *disk, const Fat32Info *info, uint32_t clust
     return ERR_OK;
 }
 
+// Записывает значение в запись FAT для заданного кластера во все копии FAT
 static ErrorCode set_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t value) {
     if (cluster < 2 || cluster > info->total_clusters + 1)
         return ERR_INVALID_ARGUMENT;

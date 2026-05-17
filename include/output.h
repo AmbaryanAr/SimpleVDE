@@ -3,10 +3,10 @@
 
 #include <stdio.h>
 
-// Обычный вывод (stdout)
+// Выводит форматированное сообщение в stdout с префиксом "svde: > "
 void svde_out(const char *fmt, ...);
 
-// Вывод ошибок (stderr)
+// Выводит форматированное сообщение об ошибке в stderr с префиксом "svde: > "
 void svde_err(const char *fmt, ...);
 
 #endif
