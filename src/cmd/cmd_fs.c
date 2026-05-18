@@ -2,6 +2,7 @@
 #include "output.h"
 #include "cmd_common.h"
 #include "fat32_util.h"
+#include "fat32_check.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -239,6 +240,37 @@ ErrorCode cmd_fs_tree(CMDArgs *args) {
 
     disk_close(&disk);
     return ERR_OK;
+}
+
+ErrorCode cmd_fs_check(CMDArgs *args) {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    if (err != ERR_OK) {
+        // Если раздел не FAT32, сообщаем, что проверка только для FAT32
+        if (err == ERR_INVALID_SIGNATURE) {
+            svde_err("Error: partition is not FAT32. Currently only FAT32 check is supported.\n");
+        }
+        return err;
+    }
+
+    int level = FSCHECK_LEVEL_QUICK;
+    if (args->level) {
+        if (strcmp(args->level, "full") == 0) {
+            level = FSCHECK_LEVEL_FULL;
+        } else if (strcmp(args->level, "quick") == 0) {
+            level = FSCHECK_LEVEL_QUICK;
+        } else {
+            svde_err("Error: unknown check level '%s'. Use 'quick' or 'full'.\n", args->level);
+            disk_close(&disk);
+            return ERR_INVALID_ARGUMENT;
+        }
+    }
+
+    err = fat32_check(&disk, start_lba, level);
+    disk_close(&disk);
+    return err;
 }
 
 ErrorCode cmd_fs_reserve_init(CMDArgs *args) {

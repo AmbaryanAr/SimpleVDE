@@ -19,6 +19,7 @@ typedef struct {
     const char *dest;       // значение -dest= (путь назначения)
     const char *path;       // значение -path= (путь внутри ФС)
     const char *fs;         // значение -fs= (тип файловой системы)
+    const char *level;     // значение -level= (quick или full)
 } CMDArgs;
 
 #endif

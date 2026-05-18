@@ -15,6 +15,13 @@ ErrorCode cmd_part_create(CMDArgs *args) {
     }
 
     int part_index = parse_part_index(args->part);
+
+    if (part_index == PART_INDEX_RAW) {
+        disk_close(&disk);
+        svde_err("Error: 'raw' is not valid for partition operations. Use MBR or GPT disk.\n");
+        return ERR_INVALID_ARGUMENT;
+    }
+
     if (part_index < 0) {
         disk_close(&disk);
         svde_err( "Invalid partition index: %s\n", args->part);

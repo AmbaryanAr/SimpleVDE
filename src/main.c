@@ -70,6 +70,8 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
                 args->path = value;
             } else if (strcmp(key, "fs") == 0) {
                 args->fs = value;
+            } else if (strcmp(key, "level") == 0) {
+                args->level = value;
             } else {
                 svde_err( "Warning: unknown parameter -%s ignored.\n", key);
             }
@@ -217,6 +219,10 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");
             err = cmd_fs_tree(&args);
+        } else if (strcmp(args.command, "check") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_check(&args);
         } else if (strcmp(args.command, "reserve-init") == 0) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");

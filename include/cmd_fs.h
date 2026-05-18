@@ -24,6 +24,9 @@ ErrorCode cmd_fs_rmdir(CMDArgs *args);
 // Выводит дерево каталогов (аналог tree)
 ErrorCode cmd_fs_tree(CMDArgs *args);
 
+// Проверяет целостность файловой системы (автоопределение типа ФС)
+ErrorCode cmd_fs_check(CMDArgs *args);
+
 // Инициализирует резервный кластер для реестра файлов
 ErrorCode cmd_fs_reserve_init(CMDArgs *args);
 
