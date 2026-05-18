@@ -78,37 +78,42 @@ static ErrorCode shell_init(const char *file, const char *part) {
         return err;
     }
 
-    PartitionTableType table_type;
-    err = partition_detect_type(&shell_state.disk, &table_type);
-    if (err != ERR_OK || table_type == PT_UNKNOWN) {
-        disk_close(&shell_state.disk);
-        svde_err( "Error: invalid partition table.\n");
-        return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
-    }
-
     int part_index = parse_part_index(part);
-    if (part_index < 0) {
+    if (part_index == PART_INDEX_INVALID) {
         disk_close(&shell_state.disk);
         svde_err( "Error: invalid partition number '%s'.\n", part);
         return ERR_INVALID_ARGUMENT;
     }
 
-    uint64_t size_sectors;
-    err = partition_get_info(&shell_state.disk, part_index, &shell_state.start_lba, &size_sectors);
-    if (err != ERR_OK) {
-        disk_close(&shell_state.disk);
-        if (err == ERR_NOT_FOUND) {
-            svde_err( "Error: partition %d does not exist.\n", part_index + 1);
-        } else {
-            svde_err( "Error: cannot get partition info.\n");
+    if (part_index == PART_INDEX_RAW) {
+        // Raw-образ: весь диск как один FAT32-раздел
+        shell_state.start_lba = 0;
+    } else {
+        PartitionTableType table_type;
+        err = partition_detect_type(&shell_state.disk, &table_type);
+        if (err != ERR_OK || table_type == PT_UNKNOWN) {
+            disk_close(&shell_state.disk);
+            svde_err( "Error: invalid partition table.\n");
+            return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
         }
-        return err;
+
+        uint64_t size_sectors;
+        err = partition_get_info(&shell_state.disk, part_index, &shell_state.start_lba, &size_sectors);
+        if (err != ERR_OK) {
+            disk_close(&shell_state.disk);
+            if (err == ERR_NOT_FOUND) {
+                svde_err( "Error: partition %d does not exist.\n", part_index + 1);
+            } else {
+                svde_err( "Error: cannot get partition info.\n");
+            }
+            return err;
+        }
     }
 
     err = fat32_get_info(&shell_state.disk, shell_state.start_lba, &shell_state.info);
     if (err != ERR_OK) {
         disk_close(&shell_state.disk);
-        svde_err( "Error: partition %d is not a valid FAT32 filesystem.\n", part_index + 1);
+        svde_err( "Error: partition is not a valid FAT32 filesystem.\n");
         return ERR_INVALID_SIGNATURE;
     }
 

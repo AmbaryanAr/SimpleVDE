@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 // Выводит сообщение об ошибке с контекстом через svde_err (формат: "Error: <context> - <текст>")
-static void print_error(ErrorCode err, const char *context) {
+void print_error(ErrorCode err, const char *context) {
     svde_err( "Error: %s - %s\n", context, error_code_to_string(err));
 }
 
@@ -14,6 +14,11 @@ static ErrorCode open_disk_and_get_partition(CMDArgs *args, Disk *disk, uint64_t
     if (err != ERR_OK) {
         print_error(err, "cannot open disk image");
         return err;
+    }
+
+    if (parse_part_index(args->part) == PART_INDEX_RAW) {
+        *start_lba = 0;
+        return ERR_OK;
     }
 
     PartitionTableType table_type;
@@ -52,6 +57,11 @@ ErrorCode open_disk_and_check_table(CMDArgs *args, Disk *disk) {
         return err;
     }
 
+    // Raw-образ: нет таблицы разделов, возвращаем успех сразу
+    if (parse_part_index(args->part) == PART_INDEX_RAW) {
+        return ERR_OK;
+    }
+
     PartitionTableType table_type;
     err = partition_detect_type(disk, &table_type);
     if (err != ERR_OK || table_type == PT_UNKNOWN) {
@@ -67,6 +77,12 @@ ErrorCode open_disk_and_get_partition_info(CMDArgs *args, Disk *disk, uint64_t *
     if (err != ERR_OK) {
         print_error(err, "cannot open disk image");
         return err;
+    }
+
+    if (parse_part_index(args->part) == PART_INDEX_RAW) {
+        *start_lba = 0;
+        *size_sectors = disk->size / SECTOR_SIZE;
+        return ERR_OK;
     }
 
     PartitionTableType table_type;

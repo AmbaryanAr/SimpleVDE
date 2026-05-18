@@ -48,7 +48,7 @@ void print_category_help(const char *category) {
         svde_out("\nNote: <size> supports K/M/G suffixes (e.g., 64M).\n");
     } else if (strcmp(category, "part") == 0) {
         svde_out("Partition operations:\n");
-        svde_out("  --part-create -file=<path> -part=<num> -size=<size> -type=<type>   Create a partition\n");
+        svde_out("  --part-create -file=<path> -part=<num> -size=<size> [-type=<type>]  Create a partition (default type: linux)\n");
         svde_out("  --part-delete -file=<path> -part=<num>                              Delete a partition\n");
         svde_out("  --part-set-type -file=<path> -part=<num> -type=<type>               Change partition type\n");
         svde_out("  --part-set-active -file=<path> -part=<num>                          Set active flag (MBR only)\n");

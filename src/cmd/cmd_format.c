@@ -21,48 +21,58 @@ ErrorCode cmd_format(CMDArgs *args) {
         return err;
     }
 
-    PartitionTableType table_type;
-    err = partition_detect_type(&disk, &table_type);
-    if (err != ERR_OK || table_type == PT_UNKNOWN) {
-        svde_err( "No valid partition table found on disk.\n");
-        disk_close(&disk);
-        return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
-    }
-
     int part_index = parse_part_index(args->part);
-    if (part_index < 0) {
+    if (part_index == PART_INDEX_INVALID) {
         svde_err( "Invalid partition number: %s\n", args->part);
         disk_close(&disk);
         return ERR_INVALID_ARGUMENT;
     }
 
     uint64_t start_lba, size_sectors;
-    err = partition_get_info(&disk, part_index, &start_lba, &size_sectors);
-    if (err != ERR_OK) {
-        if (err == ERR_NOT_FOUND) {
-            svde_err( "Partition %d does not exist.\n", part_index + 1);
-        } else {
-            svde_err( "Failed to get partition info (error %d).\n", err);
+
+    if (part_index == PART_INDEX_RAW) {
+        // Raw-образ: форматируем весь диск как один раздел
+        start_lba = 0;
+        size_sectors = disk.size / SECTOR_SIZE;
+    } else {
+        PartitionTableType table_type;
+        err = partition_detect_type(&disk, &table_type);
+        if (err != ERR_OK || table_type == PT_UNKNOWN) {
+            svde_err( "No valid partition table found on disk.\n");
+            disk_close(&disk);
+            return err != ERR_OK ? err : ERR_INVALID_SIGNATURE;
         }
-        disk_close(&disk);
-        return err;
+
+        err = partition_get_info(&disk, part_index, &start_lba, &size_sectors);
+        if (err != ERR_OK) {
+            if (err == ERR_NOT_FOUND) {
+                svde_err( "Partition %d does not exist.\n", part_index + 1);
+            } else {
+                svde_err( "Failed to get partition info (error %d).\n", err);
+            }
+            disk_close(&disk);
+            return err;
+        }
     }
 
     err = fat32_format(&disk, start_lba, size_sectors, 0x80, 0, NULL);
     if (err != ERR_OK) {
-        svde_err( "Failed to format partition %d as FAT32 (error %d).\n", part_index + 1, err);
+        svde_err( "Failed to format as FAT32 (error %d).\n", err);
         disk_close(&disk);
         return err;
     }
 
-    err = partition_set_type(&disk, part_index, "fat32");
-    if (err != ERR_OK) {
-        svde_err( "Warning: partition formatted but failed to update partition type (error %d).\n", err);
-    } else {
-        svde_out("Partition type set to FAT32.\n");
+    // Обновляем тип раздела, только если есть таблица разделов
+    if (part_index != PART_INDEX_RAW) {
+        err = partition_set_type(&disk, part_index, "fat32");
+        if (err != ERR_OK) {
+            svde_err( "Warning: partition formatted but failed to update partition type (error %d).\n", err);
+        } else {
+            svde_out("Partition type set to FAT32.\n");
+        }
     }
 
     disk_close(&disk);
-    svde_out("Partition %d successfully formatted as FAT32.\n", part_index + 1);
+    svde_out("Successfully formatted as FAT32.\n");
     return ERR_OK;
 }

@@ -7,6 +7,10 @@
 
 #include "error_codes.h"
 
+// Специальные значения, возвращаемые parse_part_index()
+#define PART_INDEX_INVALID   -1   // строка не является ни числом, ни "raw"
+#define PART_INDEX_RAW       -2   // образ без таблицы разделов (raw)
+
 // Безопасное дублирование строки в динамической памяти.
 // Возвращает копию строки или NULL при нехватке памяти.
 char* my_strdup(const char *s);

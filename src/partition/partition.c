@@ -166,6 +166,13 @@ ErrorCode partition_get_info(Disk *disk, int part_index, uint64_t *start_lba, ui
         return ERR_INVALID_ARGUMENT;
     }
 
+    // Raw-образ: весь диск как один раздел
+    if (part_index == PART_INDEX_RAW) {
+        *start_lba = 0;
+        *size_sectors = disk->size / SECTOR_SIZE;
+        return ERR_OK;
+    }
+
     PartitionTableType table_type;
     ErrorCode err = partition_detect_type(disk, &table_type);
     if (err != ERR_OK) {
@@ -192,6 +199,7 @@ void partition_print_info(Disk *disk) {
     } else if (table_type == PT_GPT) {
         gpt_print_info(disk);
     } else {
-        svde_out("No valid partition table found.\n");
+        // PT_UNKNOWN — возможно, raw-образ
+        svde_out("No valid partition table found (raw image?).\n");
     }
 }

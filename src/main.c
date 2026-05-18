@@ -136,7 +136,7 @@ int main(int argc, char *argv[]) {
     if (strcmp(cat, "disk") == 0) {
         if (strcmp(args.command, "create") == 0) {
             CHECK_ARG(args.file, "file");
-            CHECK_ARG(args.table, "table");
+            // CHECK_ARG(args.table, "table");
             CHECK_ARG(args.size, "size");
             err = cmd_disk_create(&args);
         } else if (strcmp(args.command, "info") == 0) {

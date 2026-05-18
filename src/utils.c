@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <string.h>
 
 char* my_strdup(const char *s) {
     if (!s) {
@@ -21,12 +22,16 @@ char* my_strdup(const char *s) {
 
 int parse_part_index(const char *str) {
     if (!str) {
-        return -1;
+        return PART_INDEX_INVALID;
+    }
+    // Проверка на raw-образ
+    if (strcmp(str, "raw") == 0) {
+        return PART_INDEX_RAW;
     }
     char *endptr;
     long val = strtol(str, &endptr, 10);
     if (*endptr != '\0' || val < 1 || val > 1000) {
-        return -1;
+        return PART_INDEX_INVALID;
     }
     return (int)(val - 1);
 }
