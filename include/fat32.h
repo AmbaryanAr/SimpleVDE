@@ -191,6 +191,9 @@ ErrorCode fat32_get_next_cluster(Disk *disk, const Fat32Info *info, uint32_t clu
 // Устанавливает значение записи FAT для кластера (во всех копиях FAT)
 ErrorCode fat32_set_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t value);
 
+// Обновляет счётчики свободных кластеров и подсказку next_free в FSInfo
+ErrorCode fat32_update_fsinfo(Disk *disk, const Fat32Info *info);
+
 // ==================== Функции для работы с каталогами ====================
 
 // Открывает каталог: читает всю цепочку кластеров в память

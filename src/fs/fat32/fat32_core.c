@@ -85,6 +85,18 @@ ErrorCode fat32_get_info(Disk *disk, uint64_t start_lba, Fat32Info *info) {
 
     uint64_t data_sectors = total_sec - info->reserved_sectors - info->num_fats * info->fat_size_sectors;
     info->total_clusters = (uint32_t)(data_sectors / info->sectors_per_cluster);
+
+    // Читаем FSInfo
+    uint8_t fsinfo[SECTOR_SIZE];
+    uint64_t fsinfo_lba = start_lba + bpb->fs_info_sector;
+    if (disk_read(disk, fsinfo, SECTOR_SIZE, fsinfo_lba * SECTOR_SIZE) == ERR_OK) {
+        info->free_clusters = *(uint32_t*)(fsinfo + FAT32_FSINFO_FREE_OFFSET);
+        info->next_free_cluster = *(uint32_t*)(fsinfo + FAT32_FSINFO_NEXT_FREE_OFFSET);
+    } else {
+        info->free_clusters = 0xFFFFFFFF;
+        info->next_free_cluster = 0xFFFFFFFF;
+    }
+    
     return ERR_OK;
 }
 
@@ -92,27 +104,39 @@ uint32_t fat32_alloc_cluster(Disk *disk, const Fat32Info *info) {
     for (uint32_t c = 2; c <= info->total_clusters + 1; c++) {
         uint32_t val;
         if (get_fat_entry(disk, info, c, &val) != ERR_OK)
-            return 0;  // ошибка чтения FAT
-        if (val == 0) { // свободен
+            return 0;
+        if (val == 0) {
             if (set_fat_entry(disk, info, c, 0x0FFFFFFF) != ERR_OK)
                 return 0;
+            // Обновляем счётчики
+            Fat32Info *mutable_info = (Fat32Info*)info;
+            mutable_info->free_clusters--;
+            if (c + 1 <= info->total_clusters + 1)
+                mutable_info->next_free_cluster = c + 1;
+            fat32_update_fsinfo(disk, info);
             return c;
         }
     }
-    return 0; // нет свободных
+    return 0;
 }
 
 ErrorCode fat32_free_cluster_chain(Disk *disk, const Fat32Info *info, uint32_t first_cluster) {
     uint32_t current = first_cluster;
+    uint32_t freed = 0;
     while (current >= 2 && current <= info->total_clusters + 1) {
         uint32_t next;
         ErrorCode err = get_fat_entry(disk, info, current, &next);
         if (err != ERR_OK) return err;
         err = set_fat_entry(disk, info, current, 0);
         if (err != ERR_OK) return err;
-        if (next >= 0x0FFFFFF8) break; // конец цепочки
+        freed++;
+        if (next >= 0x0FFFFFF8) break;
         current = next;
     }
+    // Обновляем счётчики
+    Fat32Info *mutable_info = (Fat32Info*)info;
+    mutable_info->free_clusters += freed;
+    fat32_update_fsinfo(disk, info);
     return ERR_OK;
 }
 
@@ -137,4 +161,26 @@ ErrorCode fat32_get_next_cluster(Disk *disk, const Fat32Info *info, uint32_t clu
 
 ErrorCode fat32_set_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t value) {
     return set_fat_entry(disk, info, cluster, value);
+}
+
+ErrorCode fat32_update_fsinfo(Disk *disk, const Fat32Info *info) {
+    uint8_t sector[SECTOR_SIZE];
+    uint64_t fsinfo_lba = info->fat1_lba - info->reserved_sectors + 1;
+
+    ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, fsinfo_lba * SECTOR_SIZE);
+    if (err != ERR_OK) return err;
+
+    // Обновляем счётчик свободных кластеров
+    *(uint32_t*)(sector + FAT32_FSINFO_FREE_OFFSET) = info->free_clusters;
+
+    // Обновляем подсказку для следующего свободного кластера
+    *(uint32_t*)(sector + FAT32_FSINFO_NEXT_FREE_OFFSET) = info->next_free_cluster;
+
+    // Основной FSInfo
+    err = disk_write(disk, sector, SECTOR_SIZE, fsinfo_lba * SECTOR_SIZE);
+    if (err != ERR_OK) return err;
+
+    // Резервный FSInfo (сектор 7)
+    err = disk_write(disk, sector, SECTOR_SIZE, (fsinfo_lba + 6) * SECTOR_SIZE);
+    return err;
 }

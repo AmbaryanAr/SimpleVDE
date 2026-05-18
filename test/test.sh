@@ -1,6 +1,10 @@
 #!/bin/bash
+# --- MSYS2 mingw64---
+# cd test
+# MSYS2_ARG_CONV_EXCL=* bash test.sh
+
 set -e
-SVDE="./simplevde.exe"
+SVDE="../simplevde.exe"
 PASS=0
 FAIL=0
 
