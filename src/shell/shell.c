@@ -127,6 +127,7 @@ static ErrorCode shell_init(const char *file, const char *part) {
 // Закрывает диск и сбрасывает состояние оболочки
 static void shell_shutdown(void) {
     if (shell_state.is_open) {
+        fat32_free_cache(&shell_state.info);
         disk_close(&shell_state.disk);
         shell_state.is_open = 0;
     }

@@ -18,11 +18,15 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
 
     // 2. Разобрать src_path на родительский каталог и имя файла
     char *path_copy = my_strdup(src_path);
-    if (!path_copy) return ERR_OUT_OF_MEMORY;
+    if (!path_copy) {
+        fat32_free_cache(&info);
+        return ERR_OUT_OF_MEMORY;
+    }
 
     char *last_slash = strrchr(path_copy, '/');
     if (!last_slash) {
         free(path_copy);
+        fat32_free_cache(&info);
         return ERR_INVALID_ARGUMENT;
     }
     *last_slash = '\0';
@@ -35,6 +39,7 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
     err = fat32_find_dir(disk, &info, parent_path, &parent_cluster);
     if (err != ERR_OK) {
         free(path_copy);
+        fat32_free_cache(&info);
         return err;
     }
 
@@ -44,6 +49,7 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
     err = fat32_read_dir(disk, &info, parent_cluster, &dir_buffer, &entries_count);
     if (err != ERR_OK) {
         free(path_copy);
+        fat32_free_cache(&info);
         return err;
     }
 
@@ -76,6 +82,7 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
                 free(long_name);
                 free(dir_buffer);
                 free(path_copy);
+                fat32_free_cache(&info);
                 return ERR_INVALID_ARGUMENT; // это каталог, не файл
             }
             free(long_name);
@@ -104,24 +111,34 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
     free(dir_buffer);
     free(path_copy);
 
-    if (!found) return ERR_NOT_FOUND;
+    if (!found) {
+        fat32_free_cache(&info);
+        return ERR_NOT_FOUND;
+    }
 
     // 5. Проверить, существует ли dest_path
     FILE *host_file = fopen(dest_path, "rb");
     if (host_file) {
         fclose(host_file);
-        if (!overwrite) return ERR_ALREADY_EXISTS;
+        if (!overwrite) {
+            fat32_free_cache(&info);
+            return ERR_ALREADY_EXISTS;
+        }
     }
 
     // 6. Открыть хост-файл для записи
     host_file = fopen(dest_path, "wb");
-    if (!host_file) return ERR_DISK_OPEN;
+    if (!host_file) {
+        fat32_free_cache(&info);
+        return ERR_DISK_OPEN;
+    }
 
     // 7. Прочитать цепочку кластеров и записать на хост
     uint32_t cluster_size = info.sectors_per_cluster * info.bytes_per_sector;
     uint8_t *buffer = (uint8_t*)malloc(cluster_size);
     if (!buffer) {
         fclose(host_file);
+        fat32_free_cache(&info);
         return ERR_OUT_OF_MEMORY;
     }
 
@@ -133,6 +150,7 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
         if (err != ERR_OK) {
             free(buffer);
             fclose(host_file);
+            fat32_free_cache(&info);
             return err;
         }
 
@@ -141,6 +159,7 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
         if (written != to_write) {
             free(buffer);
             fclose(host_file);
+            fat32_free_cache(&info);
             return ERR_DISK_WRITE;
         }
 
@@ -151,6 +170,7 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
             if (err != ERR_OK) {
                 free(buffer);
                 fclose(host_file);
+                fat32_free_cache(&info);
                 return err;
             }
         }
@@ -158,5 +178,6 @@ ErrorCode fat32_extract_file(Disk *disk, uint64_t start_lba,
 
     free(buffer);
     fclose(host_file);
+    fat32_free_cache(&info);
     return ERR_OK;
 }

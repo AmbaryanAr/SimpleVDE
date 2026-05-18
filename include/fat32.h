@@ -128,6 +128,7 @@ typedef struct {
     uint32_t total_clusters;       // общее количество кластеров данных
     uint32_t free_clusters;        // количество свободных кластеров (из FSInfo)
     uint32_t next_free_cluster;    // подсказка для поиска свободного (из FSInfo)
+    uint32_t *fat_cache;           // кэш FAT-таблицы в памяти (NULL если не загружен)
 } Fat32Info;
 
 // Представление одного кластера данных каталога в памяти
@@ -194,6 +195,8 @@ ErrorCode fat32_set_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluste
 // Обновляет счётчики свободных кластеров и подсказку next_free в FSInfo
 ErrorCode fat32_update_fsinfo(Disk *disk, const Fat32Info *info);
 
+// Освобождает кэш FAT, выделенный в fat32_get_info
+void fat32_free_cache(Fat32Info *info);
 // ==================== Функции для работы с каталогами ====================
 
 // Открывает каталог: читает всю цепочку кластеров в память

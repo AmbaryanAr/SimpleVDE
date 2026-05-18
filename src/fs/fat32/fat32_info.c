@@ -73,6 +73,7 @@ ErrorCode fat32_print_info(Disk *disk, uint64_t start_lba) {
            used_bytes, used_bytes / (1024.0 * 1024.0));
     svde_out("  Free space:           %" PRIu64 " bytes (%.2f MB)\n",
            free_bytes, free_bytes / (1024.0 * 1024.0));
-
+    
+    fat32_free_cache(&info);
     return ERR_OK;
 }

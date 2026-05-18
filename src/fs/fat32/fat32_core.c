@@ -3,34 +3,26 @@
 #include <string.h>
 #include <time.h>
 
-// Читает один сектор FAT по указанному LBA и номеру сектора внутри FAT
-static ErrorCode read_fat_sector(Disk *disk, uint64_t fat_lba, uint32_t sector_num, uint8_t *buffer) {
-    return disk_read(disk, buffer, SECTOR_SIZE, (fat_lba + sector_num) * SECTOR_SIZE);
-}
-
-// Записывает один сектор FAT по указанному LBA и номеру сектора внутри FAT
-static ErrorCode write_fat_sector(Disk *disk, uint64_t fat_lba, uint32_t sector_num, const uint8_t *buffer) {
-    return disk_write(disk, buffer, SECTOR_SIZE, (fat_lba + sector_num) * SECTOR_SIZE);
-}
-
-// Читает значение записи FAT для заданного кластера из первой копии FAT
 static ErrorCode get_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t *value) {
+    (void)disk;
     if (cluster < 2 || cluster > info->total_clusters + 1)
         return ERR_INVALID_ARGUMENT;
-    uint64_t fat_offset = cluster * 4;
-    uint32_t fat_sector = (uint32_t)(fat_offset / info->bytes_per_sector);
-    uint32_t sector_offset = fat_offset % info->bytes_per_sector;
-    uint8_t sector[SECTOR_SIZE];
-    ErrorCode err = read_fat_sector(disk, info->fat1_lba, fat_sector, sector);
-    if (err != ERR_OK) return err;
-    *value = *(uint32_t*)(sector + sector_offset) & 0x0FFFFFFF;
+    if (!info->fat_cache)
+        return ERR_FAT32_FAT_CORRUPT;
+    *value = info->fat_cache[cluster] & 0x0FFFFFFF;
     return ERR_OK;
 }
 
-// Записывает значение в запись FAT для заданного кластера во все копии FAT
 static ErrorCode set_fat_entry(Disk *disk, const Fat32Info *info, uint32_t cluster, uint32_t value) {
     if (cluster < 2 || cluster > info->total_clusters + 1)
         return ERR_INVALID_ARGUMENT;
+    if (!info->fat_cache)
+        return ERR_FAT32_FAT_CORRUPT;
+
+    // Обновляем кэш
+    info->fat_cache[cluster] = (info->fat_cache[cluster] & 0xF0000000) | (value & 0x0FFFFFFF);
+
+    // Пишем во все копии FAT на диск
     uint64_t fat_offset = cluster * 4;
     uint32_t fat_sector = (uint32_t)(fat_offset / info->bytes_per_sector);
     uint32_t sector_offset = fat_offset % info->bytes_per_sector;
@@ -38,11 +30,10 @@ static ErrorCode set_fat_entry(Disk *disk, const Fat32Info *info, uint32_t clust
 
     for (uint8_t i = 0; i < info->num_fats; i++) {
         uint64_t fat_lba = info->fat1_lba + i * info->fat_size_sectors;
-        ErrorCode err = read_fat_sector(disk, fat_lba, fat_sector, sector);
+        ErrorCode err = disk_read(disk, sector, SECTOR_SIZE, fat_lba * SECTOR_SIZE + fat_sector * SECTOR_SIZE);
         if (err != ERR_OK) return err;
-        uint32_t *entry = (uint32_t*)(sector + sector_offset);
-        *entry = (*entry & 0xF0000000) | (value & 0x0FFFFFFF);
-        err = write_fat_sector(disk, fat_lba, fat_sector, sector);
+        *(uint32_t*)(sector + sector_offset) = info->fat_cache[cluster];
+        err = disk_write(disk, sector, SECTOR_SIZE, fat_lba * SECTOR_SIZE + fat_sector * SECTOR_SIZE);
         if (err != ERR_OK) return err;
     }
     return ERR_OK;
@@ -96,23 +87,47 @@ ErrorCode fat32_get_info(Disk *disk, uint64_t start_lba, Fat32Info *info) {
         info->free_clusters = 0xFFFFFFFF;
         info->next_free_cluster = 0xFFFFFFFF;
     }
-    
+
+    // Загружаем FAT в кэш
+    info->fat_cache = (uint32_t*)malloc(info->fat_size_sectors * info->bytes_per_sector);
+    if (info->fat_cache) {
+        err = disk_read(disk, info->fat_cache,
+                        info->fat_size_sectors * info->bytes_per_sector,
+                        info->fat1_lba * SECTOR_SIZE);
+        if (err != ERR_OK) {
+            free(info->fat_cache);
+            info->fat_cache = NULL;
+            return err;
+        }
+    }
+
     return ERR_OK;
 }
 
 uint32_t fat32_alloc_cluster(Disk *disk, const Fat32Info *info) {
-    for (uint32_t c = 2; c <= info->total_clusters + 1; c++) {
-        uint32_t val;
-        if (get_fat_entry(disk, info, c, &val) != ERR_OK)
-            return 0;
-        if (val == 0) {
-            if (set_fat_entry(disk, info, c, 0x0FFFFFFF) != ERR_OK)
-                return 0;
-            // Обновляем счётчики
+    if (!info->fat_cache) return 0;
+    uint32_t start = info->next_free_cluster;
+    if (start < 2 || start > info->total_clusters + 1)
+        start = 2;
+
+    // Ищем от start до конца
+    for (uint32_t c = start; c <= info->total_clusters + 1; c++) {
+        if ((info->fat_cache[c] & 0x0FFFFFFF) == 0) {
+            set_fat_entry(disk, info, c, 0x0FFFFFFF);
             Fat32Info *mutable_info = (Fat32Info*)info;
             mutable_info->free_clusters--;
-            if (c + 1 <= info->total_clusters + 1)
-                mutable_info->next_free_cluster = c + 1;
+            mutable_info->next_free_cluster = (c + 1 <= info->total_clusters + 1) ? c + 1 : 2;
+            fat32_update_fsinfo(disk, info);
+            return c;
+        }
+    }
+    // Ищем от 2 до start
+    for (uint32_t c = 2; c < start; c++) {
+        if ((info->fat_cache[c] & 0x0FFFFFFF) == 0) {
+            set_fat_entry(disk, info, c, 0x0FFFFFFF);
+            Fat32Info *mutable_info = (Fat32Info*)info;
+            mutable_info->free_clusters--;
+            mutable_info->next_free_cluster = (c + 1 <= info->total_clusters + 1) ? c + 1 : 2;
             fat32_update_fsinfo(disk, info);
             return c;
         }
@@ -183,4 +198,11 @@ ErrorCode fat32_update_fsinfo(Disk *disk, const Fat32Info *info) {
     // Резервный FSInfo (сектор 7)
     err = disk_write(disk, sector, SECTOR_SIZE, (fsinfo_lba + 6) * SECTOR_SIZE);
     return err;
+}
+
+void fat32_free_cache(Fat32Info *info) {
+    if (info && info->fat_cache) {
+        free(info->fat_cache);
+        info->fat_cache = NULL;
+    }
 }

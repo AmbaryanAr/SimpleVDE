@@ -94,9 +94,8 @@ ErrorCode cmd_fs_ls(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     const char *path = args->path ? args->path : "/";
     err = fat32_list_dir(&disk, start_lba, path);
@@ -113,9 +112,8 @@ ErrorCode cmd_fs_mkdir(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_create_dir(&disk, start_lba, args->path);
     if (err != ERR_OK) {
@@ -134,9 +132,8 @@ ErrorCode cmd_fs_copy(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_copy_file(&disk, start_lba, args->src, args->dest);
     if (err != ERR_OK) {
@@ -167,9 +164,8 @@ ErrorCode cmd_fs_rm(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_delete_file(&disk, start_lba, args->path);
     if (err != ERR_OK) {
@@ -196,9 +192,8 @@ ErrorCode cmd_fs_rmdir(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_remove_dir(&disk, start_lba, args->path);
     if (err != ERR_OK) {
@@ -222,9 +217,8 @@ ErrorCode cmd_fs_tree(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     uint32_t start_cluster = info.root_cluster;
     const char *start_name = "/";
@@ -250,6 +244,7 @@ ErrorCode cmd_fs_check(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    fat32_free_cache(&info);
     if (err != ERR_OK) {
         // Если раздел не FAT32, сообщаем, что проверка только для FAT32
         if (err == ERR_INVALID_SIGNATURE) {
@@ -281,6 +276,7 @@ ErrorCode cmd_fs_label(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    fat32_free_cache(&info);
     if (err != ERR_OK) return err;
 
     if (args->name) {
@@ -313,6 +309,7 @@ ErrorCode cmd_fs_info(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    fat32_free_cache(&info);
     if (err != ERR_OK) return err;
 
     err = fat32_print_info(&disk, start_lba);
@@ -325,6 +322,7 @@ ErrorCode cmd_fs_extract(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    fat32_free_cache(&info);
     if (err != ERR_OK) return err;
 
     // Проверяем, существует ли dest и нужен ли флаг force
@@ -354,9 +352,8 @@ ErrorCode cmd_fs_reserve_init(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_reserve_init(&disk, start_lba);
     if (err != ERR_OK) {
@@ -375,9 +372,8 @@ ErrorCode cmd_fs_reserve_ls(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_reserve_list(&disk, start_lba);
     disk_close(&disk);
@@ -389,9 +385,8 @@ ErrorCode cmd_fs_reserve_add(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_reserve_add(&disk, start_lba, args->path);
     if (err != ERR_OK) {
@@ -410,9 +405,8 @@ ErrorCode cmd_fs_reserve_rm(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_reserve_remove(&disk, start_lba, args->name);
     if (err != ERR_OK) {
@@ -431,9 +425,8 @@ ErrorCode cmd_fs_reserve_clear(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_reserve_clear(&disk, start_lba);
     if (err != ERR_OK) {
@@ -452,9 +445,8 @@ ErrorCode cmd_fs_reserve_dump(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_reserve_dump(&disk, start_lba);
     disk_close(&disk);
@@ -466,9 +458,8 @@ ErrorCode cmd_fs_reserve_info(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
-    if (err != ERR_OK) {
-        return err;
-    }
+    fat32_free_cache(&info);
+    if (err != ERR_OK) return err;
 
     err = fat32_reserve_info(&disk, start_lba);
     disk_close(&disk);
@@ -480,6 +471,7 @@ ErrorCode cmd_fs_reserve_boot_set(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    fat32_free_cache(&info);
     if (err != ERR_OK) return err;
 
     err = fat32_reserve_boot_set(&disk, start_lba, args->name);
@@ -492,6 +484,7 @@ ErrorCode cmd_fs_reserve_boot_show(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    fat32_free_cache(&info);
     if (err != ERR_OK) return err;
 
     err = fat32_reserve_boot_show(&disk, start_lba);
@@ -504,6 +497,7 @@ ErrorCode cmd_fs_reserve_boot_clear(CMDArgs *args) {
     uint64_t start_lba;
     Fat32Info info;
     ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    fat32_free_cache(&info);
     if (err != ERR_OK) return err;
 
     err = fat32_reserve_boot_clear(&disk, start_lba);

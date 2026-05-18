@@ -142,20 +142,6 @@ static ErrorCode check_fat_and_clusters(Disk *disk, const Fat32Info *info) {
         }
     }
 
-    // Проверка кластеров, которые не принадлежат ни одной цепочке (потерянные)
-    // int orphaned = 0;
-    // for (uint32_t c = 2; c <= total_clusters + 1; c++) {
-    //     uint32_t val;
-    //     if (fat32_get_next_cluster(disk, info, c, &val) == ERR_OK) {
-    //         if (val != FAT32_CLUSTER_FREE && cluster_map[c] == 0) {
-    //             // Занятый кластер, на который никто не ссылается
-    //             // Это может быть начало цепочки (файл/каталог) — не ошибка.
-    //             // Потерянные — те, на которые нет ссылок и которые не являются началом.
-    //             // Пропускаем для простоты.
-    //         }
-    //     }
-    // }
-
     svde_out("  Free clusters: %d\n", free_count);
     svde_out("  Bad clusters: %d\n", bad_count);
 
@@ -177,6 +163,7 @@ ErrorCode fat32_check(Disk *disk, uint64_t start_lba, int level) {
     ErrorCode err = check_bpb(disk, start_lba, &info);
     if (err != ERR_OK) {
         svde_out("\nCheck aborted: BPB is corrupt.\n");
+        fat32_free_cache(&info);
         return err;
     }
 
@@ -189,10 +176,12 @@ ErrorCode fat32_check(Disk *disk, uint64_t start_lba, int level) {
         ErrorCode fat_err = check_fat_and_clusters(disk, &info);
         if (fat_err != ERR_OK) {
             svde_out("\nCheck finished with errors.\n");
+            fat32_free_cache(&info);
             return fat_err;
         }
     }
 
     svde_out("\nCheck finished: no errors.\n");
+    fat32_free_cache(&info);
     return ERR_OK;
 }
