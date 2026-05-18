@@ -27,6 +27,9 @@ ErrorCode cmd_fs_tree(CMDArgs *args);
 // Проверяет целостность файловой системы (автоопределение типа ФС)
 ErrorCode cmd_fs_check(CMDArgs *args);
 
+// Читает или устанавливает метку тома
+ErrorCode cmd_fs_label(CMDArgs *args);
+
 // Инициализирует резервный кластер для реестра файлов
 ErrorCode cmd_fs_reserve_init(CMDArgs *args);
 

@@ -223,6 +223,10 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");
             err = cmd_fs_check(&args);
+        } else if (strcmp(args.command, "label") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            err = cmd_fs_label(&args);
         } else if (strcmp(args.command, "reserve-init") == 0) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");

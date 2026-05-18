@@ -3,6 +3,7 @@
 #include "cmd_common.h"
 #include "fat32_util.h"
 #include "fat32_check.h"
+#include "fat32_label.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -271,6 +272,38 @@ ErrorCode cmd_fs_check(CMDArgs *args) {
     err = fat32_check(&disk, start_lba, level);
     disk_close(&disk);
     return err;
+}
+
+ErrorCode cmd_fs_label(CMDArgs *args) {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    if (err != ERR_OK) return err;
+
+    if (args->name) {
+        // Установка метки
+        err = fat32_set_label(&disk, start_lba, args->name);
+        if (err != ERR_OK) {
+            print_error(err, "cannot set volume label");
+            disk_close(&disk);
+            return err;
+        }
+        svde_out("Volume label set to '%s'.\n", args->name);
+    } else {
+        // Чтение метки
+        char label[12];
+        err = fat32_get_label(&disk, start_lba, label, sizeof(label));
+        if (err != ERR_OK) {
+            print_error(err, "cannot read volume label");
+            disk_close(&disk);
+            return err;
+        }
+        svde_out("Volume label: %s\n", label[0] ? label : "(empty)");
+    }
+
+    disk_close(&disk);
+    return ERR_OK;
 }
 
 ErrorCode cmd_fs_reserve_init(CMDArgs *args) {
