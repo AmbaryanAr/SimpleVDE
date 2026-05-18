@@ -1,7 +1,8 @@
-#include "cmd_extract.h"
-#include "cmd_common.h"
 #include "utils.h"
 #include "output.h"
+#include "cmd_common.h"
+#include "cmd_extract.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,7 +66,7 @@ static ErrorCode copy_disk_range(Disk *src_disk, uint64_t start_lba,
         bytes_copied += chunk;
         int percent = (int)(bytes_copied / (bytes_total / 100));
         if (percent != last_percent) {
-            svde_out("  %d%%\n", percent);
+            svde_progress(percent);
             last_percent = percent;
         }
     }

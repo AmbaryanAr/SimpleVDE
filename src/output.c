@@ -16,3 +16,14 @@ void svde_err(const char *fmt, ...) {
     vfprintf(stderr, fmt, args);
     va_end(args);
 }
+
+void svde_progress(int percent) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    if (percent == 100) {
+        printf("\r  100%%\n");
+    } else {
+        printf("\r  %d%%", percent);
+    }
+    fflush(stdout);
+}

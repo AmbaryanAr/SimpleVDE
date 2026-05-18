@@ -1,4 +1,5 @@
 #include "disk.h"
+#include "output.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -84,6 +85,7 @@ ErrorCode disk_create(const char *path, uint64_t size_bytes, Disk *disk) {
     memset(buffer, 0, buf_size);
 
     uint64_t remaining = size_bytes;
+    int last_percent = -1;
     while (remaining > 0) {
         size_t to_write = (remaining < buf_size) ? (size_t)remaining : buf_size;
         size_t written = fwrite(buffer, 1, to_write, f);
@@ -93,6 +95,12 @@ ErrorCode disk_create(const char *path, uint64_t size_bytes, Disk *disk) {
             return ERR_DISK_WRITE;
         }
         remaining -= written;
+
+        int percent = (int)((size_bytes - remaining) / (size_bytes / 100));
+        if (percent != last_percent) {
+            svde_progress(percent);
+            last_percent = percent;
+        }
     }
 
     free(buffer);
