@@ -60,7 +60,10 @@ void print_category_help(const char *category) {
     } else if (strcmp(category, "fs") == 0) {
         svde_out("Filesystem operations:\n");
         svde_out("  --fs-ls -file=<path> -part=<num> [-path=<dir>]                List directory contents\n");
-        svde_out("  --fs-copy -file=<path> -part=<num> -src=<host-file> -dest=<fs-path>  Copy file from host to image\n");
+        svde_out("  --fs-copy -file=<path> -part=<num> -src=<host-file> -dest=<fs-path>\n");
+        svde_out("                                                                Copy file from host to image\n");
+        svde_out("  --fs-extract -file=<path> -part=<num|raw> -src=<fs-path> -dest=<host-path>\n");
+        svde_out("                                                                Extract file from image to host\n");
         svde_out("  --fs-mkdir -file=<path> -part=<num> -path=<dir>               Create directory\n");
         svde_out("  --fs-rm -file=<path> -part=<num> -path=<file>                 Delete file\n");
         svde_out("  --fs-rmdir -file=<path> -part=<num> -path=<dir>               Remove empty directory\n");

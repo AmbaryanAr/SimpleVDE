@@ -231,6 +231,12 @@ int main(int argc, char *argv[]) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");
             err = cmd_fs_info(&args);
+        } else if (strcmp(args.command, "extract") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.src, "src");
+            CHECK_ARG(args.dest, "dest");
+            err = cmd_fs_extract(&args);
         } else if (strcmp(args.command, "reserve-init") == 0) {
             CHECK_ARG(args.file, "file");
             CHECK_ARG(args.part, "part");

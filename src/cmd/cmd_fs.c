@@ -5,6 +5,7 @@
 #include "fat32_util.h"
 #include "fat32_check.h"
 #include "fat32_label.h"
+#include "fat32_extract.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -317,6 +318,35 @@ ErrorCode cmd_fs_info(CMDArgs *args) {
     err = fat32_print_info(&disk, start_lba);
     disk_close(&disk);
     return err;
+}
+
+ErrorCode cmd_fs_extract(CMDArgs *args) {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    if (err != ERR_OK) return err;
+
+    // Проверяем, существует ли dest и нужен ли флаг force
+    bool overwrite = false;
+    // Если будет -force, то overwrite = true
+
+    err = fat32_extract_file(&disk, start_lba, args->src, args->dest, overwrite);
+    if (err != ERR_OK) {
+        if (err == ERR_ALREADY_EXISTS) {
+            svde_err("Error: destination file already exists. Use -force to overwrite.\n");
+        } else if (err == ERR_INVALID_ARGUMENT) {
+            svde_err("Error: source path must point to a file, not a directory.\n");
+        } else {
+            print_error(err, "cannot extract file");
+        }
+        disk_close(&disk);
+        return err;
+    }
+
+    svde_out("File '%s' extracted to '%s'.\n", args->src, args->dest);
+    disk_close(&disk);
+    return ERR_OK;
 }
 
 ErrorCode cmd_fs_reserve_init(CMDArgs *args) {

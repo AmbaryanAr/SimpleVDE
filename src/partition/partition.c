@@ -19,7 +19,15 @@ ErrorCode partition_detect_type(Disk *disk, PartitionTableType *type) {
         return err;
     }
 
+    // Проверяем, не является ли это FAT32 boot-сектором (сигнатура EB xx 90)
+    // Такой сектор имеет 55 AA, но не является MBR
+    if (sector[0] == 0xEB && sector[2] == 0x90) {
+        *type = PT_UNKNOWN;
+        return ERR_OK;
+    }
+
     if (sector[510] == 0x55 && sector[511] == 0xAA) {
+        // Проверяем защитный MBR для GPT
         int protective = 0;
         for (int i = 0; i < 4; i++) {
             uint8_t part_type = sector[MBR_PARTITION_TABLE_OFFSET + i * MBR_PARTITION_ENTRY_SIZE + 4];

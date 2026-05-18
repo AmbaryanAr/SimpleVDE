@@ -33,6 +33,9 @@ ErrorCode cmd_fs_label(CMDArgs *args);
 // Выводит информацию о файловой системе
 ErrorCode cmd_fs_info(CMDArgs *args);
 
+// Извлекает файл из образа на хост
+ErrorCode cmd_fs_extract(CMDArgs *args);
+
 // Инициализирует резервный кластер для реестра файлов
 ErrorCode cmd_fs_reserve_init(CMDArgs *args);
 

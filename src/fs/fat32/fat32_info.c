@@ -21,7 +21,8 @@ ErrorCode fat32_print_info(Disk *disk, uint64_t start_lba) {
     // Читаем серийный номер из BPB
     uint8_t sector[SECTOR_SIZE];
     disk_read(disk, sector, SECTOR_SIZE, start_lba * SECTOR_SIZE);
-    uint32_t serial = *(uint32_t*)(sector + 67);
+    Fat32BPB *bpb = (Fat32BPB*)sector;
+    uint32_t serial = bpb->volume_id;
     svde_out("Serial number: %08X\n", serial);
 
     svde_out("\nGeometry:\n");
