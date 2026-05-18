@@ -26,6 +26,7 @@ void print_global_help(void) {
     svde_out("Categories:\n");
     svde_out("  disk      - Disk operations (create, info, read, read-s, mbr-write, bpb-write)\n");
     svde_out("  part      - Partition operations (create, delete, set-type, set-active, set-inactive)\n");
+    svde_out("  extract   - Extract partition to raw file\n");
     svde_out("  format    - Format a partition (only fat32)\n");
     svde_out("  fs        - Filesystem operations (ls, copy, mkdir, rm, rmdir, tree, reserve-*)\n");
     svde_out("  shell     - Interactive shell\n");
@@ -54,6 +55,9 @@ void print_category_help(const char *category) {
         svde_out("  --part-set-active -file=<path> -part=<num>                          Set active flag (MBR only)\n");
         svde_out("  --part-set-inactive -file=<path> -part=<num>                        Unset active flag\n");
         svde_out("\n<type> can be a name (e.g., linux, fat32) or hex code for MBR, or GUID for GPT.\n");
+    } else if (strcmp(category, "extract") == 0) {
+        svde_out("Extract operations:\n");
+        svde_out("  --extract-copy -file=<path> -part=<num> -output=<file>  Copy partition to raw file\n");
     } else if (strcmp(category, "format") == 0) {
         svde_out("Format operations:\n");
         svde_out("  --format -file=<path> -part=<num> -fs=fat32   Format a partition as FAT32\n");

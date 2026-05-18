@@ -20,6 +20,7 @@ typedef struct {
     const char *path;       // значение -path= (путь внутри ФС)
     const char *fs;         // значение -fs= (тип файловой системы)
     const char *level;     // значение -level= (quick или full)
+    const char *output;    // значение -output= (путь для extract)
 } CMDArgs;
 
 #endif

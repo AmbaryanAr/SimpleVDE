@@ -2,6 +2,7 @@
 *.o
 *.obj
 *.img
+*.raw
 
 # Исполняемые файлы
 simplevde

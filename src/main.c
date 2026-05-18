@@ -8,6 +8,7 @@
 #include "cmd_part.h"
 #include "cmd_format.h"
 #include "error_codes.h"
+#include "cmd_extract.h"
 
 #include <time.h>
 #include <stdio.h>
@@ -72,6 +73,8 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
                 args->fs = value;
             } else if (strcmp(key, "level") == 0) {
                 args->level = value;
+            } else if (strcmp(key, "output") == 0) {
+                args->output = value;
             } else {
                 svde_err( "Warning: unknown parameter -%s ignored.\n", key);
             }
@@ -138,7 +141,6 @@ int main(int argc, char *argv[]) {
     if (strcmp(cat, "disk") == 0) {
         if (strcmp(args.command, "create") == 0) {
             CHECK_ARG(args.file, "file");
-            // CHECK_ARG(args.table, "table");
             CHECK_ARG(args.size, "size");
             err = cmd_disk_create(&args);
         } else if (strcmp(args.command, "info") == 0) {
@@ -306,6 +308,16 @@ int main(int argc, char *argv[]) {
             err = cmd_bpb_write(&args);
         } else {
             svde_err( "Error: unknown bpb command '%s'.\n", args.command);
+            return 1;
+        }
+    } else if (strcmp(cat, "extract") == 0) {
+        if (strcmp(args.command, "copy") == 0) {
+            CHECK_ARG(args.file, "file");
+            CHECK_ARG(args.part, "part");
+            CHECK_ARG(args.output, "output");
+            err = cmd_extract_copy(&args);
+        } else {
+            svde_err( "Error: unknown extract command '%s'.\n", args.command);
             return 1;
         }
     } else {
