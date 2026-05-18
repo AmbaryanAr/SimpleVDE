@@ -67,6 +67,7 @@ void print_category_help(const char *category) {
         svde_out("  --fs-tree -file=<path> -part=<num> [-path=<dir>]              Display directory tree\n");
         svde_out("  --fs-check -file=<path> -part=<num|raw> [-level=quick|full]   Check filesystem integrity\n");
         svde_out("  --fs-label -file=<path> -part=<num|raw> [-name=<label>]       Get/set volume label\n");
+        svde_out("  --fs-info -file=<path> -part=<num|raw>                        Show filesystem information\n");
         svde_out("\nReserve operations (filesystem registry):\n");
         svde_out("  --fs-reserve-init -file=<path> -part=<num>                    Initialize reserve cluster\n");
         svde_out("  --fs-reserve-ls -file=<path> -part=<num>                      List reserve entries\n");

@@ -30,6 +30,9 @@ ErrorCode cmd_fs_check(CMDArgs *args);
 // Читает или устанавливает метку тома
 ErrorCode cmd_fs_label(CMDArgs *args);
 
+// Выводит информацию о файловой системе
+ErrorCode cmd_fs_info(CMDArgs *args);
+
 // Инициализирует резервный кластер для реестра файлов
 ErrorCode cmd_fs_reserve_init(CMDArgs *args);
 

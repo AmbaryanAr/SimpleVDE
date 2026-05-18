@@ -1,6 +1,7 @@
 #include "cmd_fs.h"
 #include "output.h"
 #include "cmd_common.h"
+#include "fat32_info.h"
 #include "fat32_util.h"
 #include "fat32_check.h"
 #include "fat32_label.h"
@@ -304,6 +305,18 @@ ErrorCode cmd_fs_label(CMDArgs *args) {
 
     disk_close(&disk);
     return ERR_OK;
+}
+
+ErrorCode cmd_fs_info(CMDArgs *args) {
+    Disk disk;
+    uint64_t start_lba;
+    Fat32Info info;
+    ErrorCode err = open_disk_and_prepare_fs(args, &disk, &start_lba, &info);
+    if (err != ERR_OK) return err;
+
+    err = fat32_print_info(&disk, start_lba);
+    disk_close(&disk);
+    return err;
 }
 
 ErrorCode cmd_fs_reserve_init(CMDArgs *args) {
