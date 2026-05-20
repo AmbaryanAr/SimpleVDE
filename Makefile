@@ -7,7 +7,7 @@ ifeq ($(OS),Windows_NT)
     TARGET = simplevde.exe
 else
     TARGET = simplevde
-    CFLAGS += -D_FILE_OFFSET_BITS=64
+    CFLAGS += -D_FILE_OFFSET_BITS=64 -D_DEFAULT_SOURCE
 endif
 
 SRCDIR = src
