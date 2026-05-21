@@ -26,10 +26,11 @@
 - Кэширование FAT в памяти
 - Кроссплатформенность: Windows 10/11, Linux Mint/Debian
 
-## Сборка
-
-### Linux и Windows (MSYS2 MinGW64)
+## Получение исходников и сборка
+### Через git
 ```bash
+git clone https://github.com/AmbaryanAr/SimpleVDE
+cd simplevde
 make
 ```
 

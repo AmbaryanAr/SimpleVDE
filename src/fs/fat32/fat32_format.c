@@ -128,11 +128,29 @@ ErrorCode fat32_format(Disk *disk, uint64_t start_lba, uint64_t total_sectors,
     free(fat_buffer);
     if (err != ERR_OK) return err;
 
-    // Создание корневого каталога в кластере 2 (область данных)
+    // Создание корневого каталога в кластере 2 с записями . и ..
     uint32_t cluster_size = spc * SECTOR_SIZE;
     uint8_t *root_buf = (uint8_t*)calloc(1, cluster_size);
     if (!root_buf) return ERR_OUT_OF_MEMORY;
-    uint64_t root_lba = start_lba + 32 + 2 * fat_sectors; // первый сектор данных
+
+    // Запись "." — указывает на кластер 2 (себя)
+    Fat32ShortEntry *dot = (Fat32ShortEntry*)root_buf;
+    memset(dot->name, ' ', 11);
+    dot->name[0] = '.';
+    dot->attr = FAT32_ATTR_DIRECTORY;
+    dot->first_cluster_hi = 0;
+    dot->first_cluster_lo = 2;
+
+    // Запись ".." — для корня тоже указывает на кластер 2
+    Fat32ShortEntry *dotdot = (Fat32ShortEntry*)(root_buf + 32);
+    memset(dotdot->name, ' ', 11);
+    dotdot->name[0] = '.';
+    dotdot->name[1] = '.';
+    dotdot->attr = FAT32_ATTR_DIRECTORY;
+    dotdot->first_cluster_hi = 0;
+    dotdot->first_cluster_lo = 2;
+
+    uint64_t root_lba = start_lba + 32 + 2 * fat_sectors;
     err = disk_write(disk, root_buf, cluster_size, root_lba * SECTOR_SIZE);
     free(root_buf);
     return err; // ERR_OK при успехе
