@@ -5,54 +5,6 @@
 #include <ctype.h>
 #include <stdio.h>
 
-// Ищет запись в открытом каталоге по имени (аналог функции из fat32_dir.c).
-// Возвращает 0 при успехе, -1 если не найдено.
-static int find_entry_by_name(Disk *disk, const Fat32Info *info, Fat32Directory *dir,
-                              const char *name, uint32_t *out_cluster_idx, uint32_t *out_entry_idx) {
-    if (!disk || !info || !dir || !name || !out_cluster_idx || !out_entry_idx) return -1;
-
-    // Читаем весь каталог в линейный буфер
-    uint8_t *buffer = NULL;
-    uint32_t entries_count = 0;
-    ErrorCode err = fat32_read_dir(disk, info, dir->clusters[0].cluster_num, &buffer, &entries_count);
-    if (err != ERR_OK) return -1;
-
-    uint32_t entries_per_cluster = (info->sectors_per_cluster * info->bytes_per_sector) / 32;
-    int result = -1;
-
-    for (uint32_t i = 0; i < entries_count; i++) {
-        const uint8_t *entry = buffer + i * 32;
-        if (entry[0] == 0x00) break;
-        if (entry[0] == 0xE5) continue;
-        if (entry[11] == FAT32_ATTR_LFN) continue;
-
-        const Fat32ShortEntry *se = (const Fat32ShortEntry*)entry;
-
-        char *long_name = extract_lfn_name(buffer, i);
-        char sfn_name[13];
-        const char *cmp_name;
-
-        if (long_name) {
-            cmp_name = long_name;
-        } else {
-            sfn_to_display_name(se->name, sfn_name, sizeof(sfn_name));
-            cmp_name = sfn_name;
-        }
-
-        if (strcasecmp_ascii(cmp_name, name) == 0) {
-            *out_cluster_idx = i / entries_per_cluster;
-            *out_entry_idx = i % entries_per_cluster;
-            result = 0;
-            free(long_name);
-            break;
-        }
-        free(long_name);
-    }
-
-    free(buffer);
-    return result;
-}
-
 // Помечает запись каталога и все связанные LFN как удалённые, записывает изменения на диск
 static ErrorCode mark_entry_deleted(Disk *disk, const Fat32Info *info, Fat32Directory *dir,
                                     uint32_t cluster_idx, uint32_t entry_idx) {
@@ -395,7 +347,7 @@ ErrorCode fat32_delete_file(Disk *disk, uint64_t start_lba, const char *path) {
     }
 
     uint32_t cluster_idx, entry_idx;
-    if (find_entry_by_name(disk, &info, &parent_dir, file_name, &cluster_idx, &entry_idx) != 0) {
+    if (fat32_find_entry_in_dir(disk, &info, &parent_dir, file_name, &cluster_idx, &entry_idx) != 0) {
         fat32_dir_close(&parent_dir);
         free(path_copy);
         return ERR_NOT_FOUND;

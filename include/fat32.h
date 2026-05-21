@@ -236,6 +236,12 @@ ErrorCode fat32_find_dir(Disk *disk, const Fat32Info *info, const char *path, ui
 // Выводит содержимое каталога через svde_out
 ErrorCode fat32_list_dir(Disk *disk, uint64_t start_lba, const char *path);
 
+// Ищет запись в открытом каталоге по имени (с учётом LFN).
+// Возвращает 0 при успехе, -1 если не найдено.
+// Заполняет out_cluster_idx и out_entry_idx.
+int fat32_find_entry_in_dir(Disk *disk, const Fat32Info *info, Fat32Directory *dir,
+                            const char *name, uint32_t *out_cluster_idx, uint32_t *out_entry_idx);
+
 // ==================== Функции подготовки записей ====================
 
 // Подготавливает запись для нового файла/каталога: генерирует SFN, LFN, заполняет info
