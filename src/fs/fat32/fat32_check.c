@@ -115,6 +115,7 @@ static ErrorCode check_fat_and_clusters(Disk *disk, const Fat32Info *info) {
 
     svde_out("  Scanning FAT (%u clusters)...\n", total_clusters);
 
+    // Первый проход: собираем статистику и карту ссылок
     for (uint32_t c = 2; c <= total_clusters + 1; c++) {
         uint32_t val;
         if (fat32_get_next_cluster(disk, info, c, &val) != ERR_OK) {
@@ -130,7 +131,6 @@ static ErrorCode check_fat_and_clusters(Disk *disk, const Fat32Info *info) {
         } else if (val >= FAT32_CLUSTER_LAST_MIN) {
             // Конец цепочки — корректно
         } else if (val >= 2 && val <= total_clusters + 1) {
-            // Ссылка на другой кластер — проверим, что нет дублей
             cluster_map[val]++;
             if (cluster_map[val] > 1) {
                 svde_out("  [FAIL] Cluster %u referenced more than once\n", val);
@@ -140,6 +140,41 @@ static ErrorCode check_fat_and_clusters(Disk *disk, const Fat32Info *info) {
             svde_out("  [FAIL] Cluster %u has invalid FAT value 0x%08X\n", c, val);
             errors++;
         }
+    }
+
+    // Второй проход: проверка на циклические ссылки
+    svde_out("  Checking for cyclic references...\n");
+    for (uint32_t c = 2; c <= total_clusters + 1; c++) {
+        uint32_t val;
+        if (fat32_get_next_cluster(disk, info, c, &val) != ERR_OK) continue;
+        
+        if (val == FAT32_CLUSTER_FREE || val == FAT32_CLUSTER_BAD) continue;
+        if (val >= FAT32_CLUSTER_LAST_MIN) continue;
+        
+        if (cluster_map[c] > 0) continue;
+        
+        uint8_t *visited = (uint8_t*)calloc(total_clusters + 2, 1);
+        if (!visited) {
+            free(cluster_map);
+            return ERR_OUT_OF_MEMORY;
+        }
+        
+        uint32_t current = c;
+        while (current >= 2 && current <= total_clusters + 1) {
+            if (visited[current]) {
+                svde_out("  [FAIL] Cycle detected starting at cluster %u\n", c);
+                errors++;
+                break;
+            }
+            visited[current] = 1;
+            
+            uint32_t next;
+            if (fat32_get_next_cluster(disk, info, current, &next) != ERR_OK) break;
+            if (next >= FAT32_CLUSTER_LAST_MIN) break;
+            if (next < 2 || next > total_clusters + 1) break;
+            current = next;
+        }
+        free(visited);
     }
 
     svde_out("  Free clusters: %d\n", free_count);
