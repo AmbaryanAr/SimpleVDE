@@ -21,6 +21,7 @@ typedef struct {
     const char *fs;         // значение -fs= (тип файловой системы)
     const char *level;     // значение -level= (quick или full)
     const char *output;    // значение -output= (путь для extract)
+    const char *spc;        // значение -spc= (размер кластера в секторах)
 } CMDArgs;
 
 #endif

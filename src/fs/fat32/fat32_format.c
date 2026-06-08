@@ -5,7 +5,8 @@
 #include <stdlib.h>
 
 ErrorCode fat32_format(Disk *disk, uint64_t start_lba, uint64_t total_sectors,
-                       uint8_t drive_number, uint32_t volume_id, const char *volume_label) {
+                       uint8_t drive_number, uint32_t volume_id, const char *volume_label,
+                       uint8_t spc_override) {
     // FAT32 использует 32-битные поля для числа секторов
     if (total_sectors > UINT32_MAX) {
         return ERR_INVALID_ARGUMENT;
@@ -19,19 +20,24 @@ ErrorCode fat32_format(Disk *disk, uint64_t start_lba, uint64_t total_sectors,
 
     // Определяем sectors_per_cluster (степень двойки) в зависимости от размера раздела
     uint8_t spc;
-    if (total_sec <= 512 * 1024)          // до 256 МБ (512 * 1024 секторов * 512 байт = 256 МБ)
-        spc = 1;
-    else if (total_sec <= 1024 * 1024)    // до 512 МБ
-        spc = 2;
-    else if (total_sec <= 2048 * 1024)    // до 1 ГБ
-        spc = 4;
-    else if (total_sec <= 4096 * 1024)    // до 2 ГБ
-        spc = 8;
-    else if (total_sec <= 8192 * 1024)    // до 4 ГБ
-        spc = 16;
-    else                                  // больше 4 ГБ
-        spc = 32;
-
+    if (spc_override != 0) {
+        // Проверка, что значение — степень двойки и в допустимом диапазоне
+        if ((spc_override & (spc_override - 1)) != 0) {
+            return ERR_INVALID_ARGUMENT; // не степень двойки
+        }
+        if (spc_override * SECTOR_SIZE > 32768) {
+            return ERR_INVALID_ARGUMENT; // превышает 32 КБ
+        }
+        spc = spc_override;
+    } else {
+        if (total_sec <= 512 * 1024)       spc = 1;    // до 256 МБ (512 * 1024 секторов * 512 байт = 256 МБ)
+        else if (total_sec <= 1024 * 1024) spc = 2;    // до 512 МБ
+        else if (total_sec <= 2048 * 1024) spc = 4;    // до 1 ГБ
+        else if (total_sec <= 4096 * 1024) spc = 8;    // до 2 ГБ
+        else if (total_sec <= 8192 * 1024) spc = 16;   // до 4 ГБ
+        else spc = 32;                                 // больше 4 ГБ
+    }
+    
     uint32_t data_sectors = total_sec - 32;               // секторы данных (после резервных и FAT)
     uint32_t clusters = data_sectors / spc;
     if (clusters < 1) {

@@ -10,7 +10,7 @@
 #define PROGRAM_NAME "Simple Virtual Disk Editor"
 
 // Версия программы
-#define PROGRAM_VERSION "0.20.0"
+#define PROGRAM_VERSION "0.21.0"
 
 // Автор программы
 #define PROGRAM_AUTHOR "Ambaryan AR"

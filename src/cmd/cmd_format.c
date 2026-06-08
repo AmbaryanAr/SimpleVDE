@@ -14,6 +14,17 @@ ErrorCode cmd_format(CMDArgs *args) {
         return ERR_NOT_SUPPORTED;
     }
 
+    // Параметр размера кластера (опционально)
+    uint8_t spc_override = 0;
+    if (args->spc) {
+        uint64_t spc_val;
+        if (!parse_integer(args->spc, &spc_val) || spc_val == 0 || spc_val > 255) {
+            svde_err("Error: invalid sectors per cluster value: %s\n", args->spc);
+            return ERR_INVALID_ARGUMENT;
+        }
+        spc_override = (uint8_t)spc_val;
+    }
+    
     Disk disk;
     ErrorCode err = disk_open(args->file, &disk);
     if (err != ERR_OK) {
@@ -55,7 +66,7 @@ ErrorCode cmd_format(CMDArgs *args) {
         }
     }
 
-    err = fat32_format(&disk, start_lba, size_sectors, 0x80, 0, NULL);
+    err = fat32_format(&disk, start_lba, size_sectors, 0x80, 0, NULL, spc_override);
     if (err != ERR_OK) {
         svde_err( "Failed to format as FAT32 (error %d).\n", err);
         disk_close(&disk);

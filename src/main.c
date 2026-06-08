@@ -75,6 +75,8 @@ static void parse_arguments(int argc, char *argv[], CMDArgs *args) {
                 args->level = value;
             } else if (strcmp(key, "output") == 0) {
                 args->output = value;
+            } else if (strcmp(key, "spc") == 0) {
+                args->spc = value;
             } else {
                 svde_err( "Warning: unknown parameter -%s ignored.\n", key);
             }

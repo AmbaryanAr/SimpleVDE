@@ -60,7 +60,7 @@ void print_category_help(const char *category) {
         svde_out("  --extract-copy -file=<path> -part=<num> -output=<file>  Copy partition to raw file\n");
     } else if (strcmp(category, "format") == 0) {
         svde_out("Format operations:\n");
-        svde_out("  --format -file=<path> -part=<num> -fs=fat32   Format a partition as FAT32\n");
+        svde_out("  --format -file=<path> -part=<num|raw> -fs=fat32 [-spc=<1|2|4|8|16|32>]   Format partition\n");
     } else if (strcmp(category, "fs") == 0) {
         svde_out("Filesystem operations:\n");
         svde_out("  --fs-ls -file=<path> -part=<num> [-path=<dir>]                List directory contents\n");

@@ -169,7 +169,8 @@ typedef struct {
 
 // Форматирует раздел как FAT32 с заданными параметрами
 ErrorCode fat32_format(Disk *disk, uint64_t start_lba, uint64_t total_sectors,
-                       uint8_t drive_number, uint32_t volume_id, const char *volume_label);
+                       uint8_t drive_number, uint32_t volume_id, const char *volume_label,
+                       uint8_t spc_override);
 
 // Считывает BPB и заполняет структуру Fat32Info (параметры тома)
 ErrorCode fat32_get_info(Disk *disk, uint64_t start_lba, Fat32Info *info);
