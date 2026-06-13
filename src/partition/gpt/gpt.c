@@ -622,32 +622,36 @@ bool gpt_type_from_name(const char *name, uint8_t *guid) {
 
 void gpt_guid_to_string(const uint8_t *guid, char *str) {
     sprintf(str, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-            guid[3], guid[2], guid[1], guid[0],
-            guid[5], guid[4],
-            guid[7], guid[6],
-            guid[8], guid[9],
-            guid[10], guid[11], guid[12], guid[13], guid[14], guid[15]);
+            guid[3], guid[2], guid[1], guid[0],   // data1 (little-endian)
+            guid[5], guid[4],                      // data2 (little-endian)
+            guid[7], guid[6],                      // data3 (little-endian)
+            guid[8], guid[9],                      // data4 (big-endian, как есть)
+            guid[10], guid[11],                    // data5 (big-endian)
+            guid[12], guid[13],                    // data6 (big-endian)
+            guid[14], guid[15]);                   // data7 (big-endian)
 }
 
 int gpt_guid_from_string(const char *str, uint8_t *guid) {
-    const char *p = str;
-    for (int byte = 0; byte < 16; byte++) {
-        char hex[3] = {0};
-        while (*p == '-') {
-            p++;
-        }
-        if (!isxdigit((unsigned char)p[0]) || !isxdigit((unsigned char)p[1])) {
-            return -1;
-        }
-        hex[0] = *p++;
-        hex[1] = *p++;
-        guid[byte] = (uint8_t)strtoul(hex, NULL, 16);
-    }
-    while (*p == '-') {
-        p++;
-    }
-    if (*p != '\0') {
+    uint32_t data1;
+    uint16_t data2, data3, data4, data5, data6, data7;
+    
+    if (sscanf(str, "%08x-%04hx-%04hx-%04hx-%04hx%04hx%04hx",
+               &data1, &data2, &data3, &data4, &data5, &data6, &data7) != 7) {
         return -1;
     }
+    
+    memcpy(guid, &data1, 4);      // little-endian
+    memcpy(guid + 4, &data2, 2);  // little-endian
+    memcpy(guid + 6, &data3, 2);  // little-endian
+    // Последние 4 компонента — big-endian (байты как есть)
+    guid[8]  = (uint8_t)(data4 >> 8);
+    guid[9]  = (uint8_t)(data4 & 0xFF);
+    guid[10] = (uint8_t)(data5 >> 8);
+    guid[11] = (uint8_t)(data5 & 0xFF);
+    guid[12] = (uint8_t)(data6 >> 8);
+    guid[13] = (uint8_t)(data6 & 0xFF);
+    guid[14] = (uint8_t)(data7 >> 8);
+    guid[15] = (uint8_t)(data7 & 0xFF);
+    
     return 0;
 }
